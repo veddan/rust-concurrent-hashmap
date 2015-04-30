@@ -4,7 +4,7 @@ use std::collections::hash_map::RandomState;
 use std::sync::{RwLock, RwLockReadGuard};
 use std::default::Default;
 use std::num::ToPrimitive;
-use std::mem::replace;
+use std::mem::swap;
 use std::cmp::min;
 use std::u16;
 use table::*;
@@ -54,11 +54,11 @@ impl <K: Hash + Eq + ::std::fmt::Debug, V: ::std::fmt::Debug, S: HashState> Conc
         }
     }
 
-    pub fn insert(&self, key: K, value: V) {
+    pub fn insert(&self, key: K, value: V) -> Option<V> {
         let hash = self.hash(&key);
         let table_idx = self.table_for(hash);
         let mut table = self.tables[table_idx].write().unwrap();
-        table.put(key, value, hash, &self.hash_state, |old, new| { replace(old, new); }, false);
+        table.put(key, value, hash, &self.hash_state, |old, mut new| { swap(old, &mut new); new }, false)
     }
 
     pub fn upsert<U: Fn(&mut V)>(&self, key: K, value: V, updater: &U) {
@@ -245,7 +245,8 @@ mod test {
         assert!(map.find(&1).is_none());
         map.insert(1, &"old");
         assert_eq!(map.find(&1).unwrap().get(), &"old");
-        map.insert(1, &"new");
+        let old = map.insert(1, &"new");
+        assert_eq!(Some("old"), old);
         assert_eq!(map.find(&1).unwrap().get(), &"new");
     }
 

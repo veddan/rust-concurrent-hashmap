@@ -102,8 +102,8 @@ impl <K: Hash+Eq+::std::fmt::Debug, V: ::std::fmt::Debug> Table<K, V> {
         return None;
     }
 
-    pub fn put<H: HashState, U: Fn(&mut V, V)>(&mut self, key: K, value: V, hash: u64, hash_state: &H,
-                                               update: U, is_resize: bool) {
+    pub fn put<H: HashState, T, U: Fn(&mut V, V)-> T,>(&mut self, key: K, value: V, hash: u64, hash_state: &H,
+                                               update: U, is_resize: bool) -> Option<T> {
         if !is_resize {
             //println!("thread {:?} inserting {:?} => {:?}", ::std::thread::current().name(), key, value);
             //self.dump_table();
@@ -121,11 +121,10 @@ impl <K: Hash+Eq+::std::fmt::Debug, V: ::std::fmt::Debug> Table<K, V> {
                 if !self.is_present(i) {
                     let bucket = Bucket { key: key, value: value };
                     unsafe { self.put_at_empty(bucket, i); }
-                    return;
+                    return None;
                 } else if self.compare_key_at(&key, i) {
                     let old_value = unsafe { &mut (*self.buckets.offset(i as isize)).value };
-                    update(old_value, value);
-                    return;
+                    return Some(update(old_value, value));
                 }
                 if i == len - 1 { break; }
                 j += 1;
@@ -148,8 +147,6 @@ impl <K: Hash+Eq+::std::fmt::Debug, V: ::std::fmt::Debug> Table<K, V> {
     }
 
     fn resize<H: HashState>(&mut self, hash_state: &H) {
-        let used = self.present.iter().filter(|&x| x).count() as f64;
-        let load_factor = used / (self.present.len() as f64);
         //println!("resizing at load factor {}", load_factor);
         let len = self.bucket_count();
         let new_len = max(len.checked_add(len).expect("size overflow"), MIN_LEN);
@@ -176,7 +173,7 @@ impl <K: Hash+Eq+::std::fmt::Debug, V: ::std::fmt::Debug> Table<K, V> {
         mem::swap(self, &mut new_table);
     }
 
-    fn dump_table(&self) {
+    fn _dump_table(&self) {
         unsafe {
             let table = ::std::slice::from_raw_parts(self.buckets, self.bucket_count());
             for (i, e) in table.iter().enumerate() {
@@ -188,6 +185,11 @@ impl <K: Hash+Eq+::std::fmt::Debug, V: ::std::fmt::Debug> Table<K, V> {
                 }
             }
         }
+    }
+
+    fn _load_factor(&self) -> f64 {
+        let used = self.present.iter().filter(|&x| x).count() as f64;
+        used / (self.present.len() as f64)
     }
 }
 
