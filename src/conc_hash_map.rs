@@ -107,6 +107,12 @@ impl <K, V, S> ConcHashMap<K, V, S> {
            bucket: 0
        }
     }
+
+    pub fn clear(&self) {
+        for table in self.tables.iter() {
+            table.write().unwrap().clear();
+        }
+    }
 }
 
 impl <K: Hash + Eq+ ::std::fmt::Debug, V: ::std::fmt::Debug, S: HashState+Default> Default for ConcHashMap<K, V, S> {
@@ -299,6 +305,18 @@ mod test {
         let clone = orig.clone();
         for i in 0..100 {
             assert_eq!(orig.find(&i).unwrap().get(), clone.find(&i).unwrap().get());
+        }
+    }
+
+    #[test]
+    fn test_clear() {
+        let map: ConcHashMap<i32, i32> = Default::default();
+        for i in 0..100 {
+            map.insert(i, i * i);
+        }
+        map.clear();
+        for i in 0..100 {
+            assert!(map.find(&i).is_none());
         }
     }
 

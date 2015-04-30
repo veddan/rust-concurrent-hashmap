@@ -221,6 +221,15 @@ impl <K, V> Table<K, V> {
         return None;
     }
 
+    pub fn clear(&mut self) {
+        for (i, _) in self.present.iter().enumerate().filter(|&(_, x)| x) {
+            unsafe {
+                drop::<Bucket<K, V>>(ptr::read(self.buckets.offset(i as isize)));
+            }
+        }
+        self.present.clear();
+    }
+
     fn is_present(&self, idx: usize) -> bool {
         self.present[idx]
     }
