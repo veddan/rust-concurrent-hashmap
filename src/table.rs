@@ -4,11 +4,12 @@ use std::collections::hash_state::HashState;
 use std::sync::{RwLockReadGuard};
 use std::ptr;
 use std::mem;
-use std::cmp::{min, max};
+use std::cmp::{max};
 use std::mem::{align_of, size_of, drop};
+use std::marker::{Send, Sync};
 use alloc::heap::{allocate, deallocate};
 
-use std::io::Write;
+const TOMBSTONE: u8 = 0xDE;
 
 const MIN_LEN: usize = 16;
 
@@ -18,19 +19,9 @@ const MIN_LEN: usize = 16;
 const MAX_LEN: u64 = (1 << 48) - 1;
 
 #[inline(always)]
-fn neigh_len<K, V>() -> usize {
-    max(8, 64 / size_of::<Bucket<K, V>>())
-}
-
-#[inline(always)]
-fn max_probe_distance<K, V>() -> usize {
-    min(::std::u8::MAX as usize, 4 * neigh_len::<K, V>())
-}
-
-#[inline(always)]
 fn table_align<K, V>() -> usize { max(align_of::<Bucket<K, V>>(), 64) }
 
-unsafe fn alloc_elems<K, V>(count: usize) -> *mut Bucket<K, V> {
+unsafe fn alloc_buckets<K, V>(count: usize) -> *mut Bucket<K, V> {
     let alloc_size = match count.checked_mul(size_of::<Bucket<K, V>>()) {
         None    => panic!("allocation size overflow"),
         Some(s) => s
@@ -39,8 +30,10 @@ unsafe fn alloc_elems<K, V>(count: usize) -> *mut Bucket<K, V> {
     if p.is_null() {
         ::alloc::oom()
     } else {
-        println!("allocated table 0x{:x}, {}", p as usize, count);
-        p as *mut Bucket<K, V>
+        //println!("allocated table 0x{:x}, {}", p as usize, count);
+        let buckets = p as *mut Bucket<K, V>;
+        ptr::write_bytes(buckets, 0, count);
+        buckets
     }
 }
 
@@ -48,12 +41,11 @@ unsafe fn alloc_elems<K, V>(count: usize) -> *mut Bucket<K, V> {
 struct Bucket<K, V> {
     key: K,
     value: V,
-    displacement: u8
 }
 
 pub struct Table<K, V> {
     present: BitVec,
-    entries: *mut Bucket<K, V>,
+    buckets: *mut Bucket<K, V>,
 }
 
 pub struct Accessor<'a, K: 'a, V: 'a> {
@@ -72,28 +64,40 @@ impl <'a, K, V> Accessor<'a, K, V> {
     pub fn get(&self) -> &'a V {
         debug_assert!(self.table.present[self.idx]);
         unsafe {
-            &(*self.table.entries.offset(self.idx as isize)).value
+            &(*self.table.buckets.offset(self.idx as isize)).value
         }
     }
 }
 
 impl <K: Hash+Eq+::std::fmt::Debug, V: ::std::fmt::Debug> Table<K, V> {
     pub fn new(reserve: usize) -> Table<K, V> {
+        assert!(size_of::<Bucket<K, V>>() >= 1);
         Table {
             present: BitVec::from_elem(reserve, false),
-            entries: unsafe { alloc_elems(reserve) }
+            buckets: unsafe { alloc_buckets(reserve) }
         }
     }
 
     pub fn lookup(&self, key: &K, hash: u64) -> Option<usize> {
-        let (neigh_start, neigh_end) = self.get_neighborhood(hash);
-        for i in neigh_start..neigh_end {
-            if !self.present[i] { continue; }
-            println!("looking for {:?} at {}: {:?}", key, i,
-                     unsafe { &(*self.entries.offset(i as isize)).key });
-            if self.compare_key_at(key, i) {
+        let len = self.bucket_count();
+        if len == 0 {
+            return None;
+        }
+        let mask = len - 1;
+        let hash = hash as usize;
+        let mut i = hash & mask;
+        let mut j = 0;
+        loop {
+            if self.is_present(i) && self.compare_key_at(key, i) {
                 return Some(i);
             }
+            if !self.is_present(i) && !self.is_deleted(i) {
+                // The key we're searching for would have been placed here if it existed
+                return None;
+            }
+            if i == len - 1 { break; }
+            j += 1;
+            i = (i + j) & mask;
         }
         return None;
     }
@@ -101,96 +105,44 @@ impl <K: Hash+Eq+::std::fmt::Debug, V: ::std::fmt::Debug> Table<K, V> {
     pub fn put<H: HashState, U: Fn(&mut V, V)>(&mut self, key: K, value: V, hash: u64, hash_state: &H,
                                                update: U, is_resize: bool) {
         if !is_resize {
-            println!("\ninserting {:?} => {:?}", key, value);
-            self.dump_table();
+            //println!("thread {:?} inserting {:?} => {:?}", ::std::thread::current().name(), key, value);
+            //self.dump_table();
         }
-        let neighborhood = self.get_neighborhood(hash);
-        let mut neigh_start = neighborhood.0;
-        let mut neigh_end = neighborhood.1;
-        let mut free;
-        if !is_resize { println!("wanted bucket: {}", neigh_start); }
+        if self.bucket_count() == 0 {
+            self.resize(hash_state);
+        }
         loop {
-            match self.find_free_slot(neigh_start) {
-                Some(i) => { free = i; break; },
-                None    => {
-                    self.resize(hash_state);
-                    let neighborhood = self.get_neighborhood(hash);
-                    neigh_start = neighborhood.0;
-                    neigh_end = neighborhood.1;
+            let len = self.bucket_count();
+            let mask = len - 1;
+            let hash = hash as usize;
+            let mut i = hash & mask;
+            let mut j = 0;
+            loop {
+                if !self.is_present(i) {
+                    let bucket = Bucket { key: key, value: value };
+                    unsafe { self.put_at_empty(bucket, i); }
+                    return;
+                } else if self.compare_key_at(&key, i) {
+                    let old_value = unsafe { &mut (*self.buckets.offset(i as isize)).value };
+                    update(old_value, value);
+                    return;
                 }
+                if i == len - 1 { break; }
+                j += 1;
+                i = (i + j) & mask;
             }
+            self.resize(hash_state);
         }
-       if !is_resize { println!("free: {}, bucket: ({}, {})", free, neigh_start, neigh_end); }
-        if free < neigh_end {
-            let displacement = (free - neigh_start) as u8;
-            unsafe {
-                self.put_at_empty(Bucket { key: key, value: value, displacement: displacement }, free);
-            }
-            return;
-        }
-        let mut l = free;
-        'next_neighborhood: loop {
-            l = max(neigh_start, l.saturating_sub(neigh_len::<K, V>() - 1));
-            for i in l..free {
-                unsafe {
-                    if !is_resize { println!("considering swapping {}", i); }
-                    let home = i - (*self.entries.offset(i as isize)).displacement as usize;
-                    println!("free: {}, home: {}", free, home);
-                    if free - home >= neigh_len::<K, V>() {
-                        // If we swapped i with free, i would be too far from home
-                        continue;
-                    }
-                    self.swap(i, free);
-                    free = i;
-                    if free - neigh_start < neigh_len::<K, V>() {
-                        let displacement = (free - home) as u8;
-                        self.put_at_empty(Bucket { key: key, value: value, displacement: displacement }, free);
-                        return;
-                    }
-                    continue 'next_neighborhood;
-                }
-            }
-            if l == neigh_start {
-                // Nothing to swap with between the free bucket and the "home" bucket
-                break;
-            }
-        }
-        self.resize(hash_state);
-        self.put(key, value, hash, hash_state,update, is_resize);
     }
 
     fn compare_key_at(&self, key: &K, idx: usize) -> bool {
         assert!(self.present[idx]);
-        unsafe { &(*self.entries.offset(idx as isize)).key == key }
-    }
-
-    fn get_neighborhood(&self, hash: u64) -> (usize, usize) {
-        let len = self.present.len();
-        let start = (hash as usize) & (len - 1);  // TODO Are we sure len > 0?
-        let end = min(len, start + neigh_len::<K, V>());
-        (start, end)
-    }
-
-    fn find_free_slot(&self, start: usize) -> Option<usize> {
-        for (i, _) in self.present.iter().enumerate().skip(start).take(max_probe_distance::<K, V>())
-                                  .filter(|&(_, x)| !x) {
-            return Some(i);
-        }
-        return None;
-    }
-
-    unsafe fn swap(&mut self, a: usize, b: usize) {
-        debug_assert!(a != b);
-        mem::swap(&mut *self.entries.offset(a as isize), &mut *self.entries.offset(b as isize));
-        let xa = self.present[a];
-        let xb = self.present[b];
-        self.present.set(a, xb);
-        self.present.set(b, xa);
+        unsafe { &(*self.buckets.offset(idx as isize)).key == key }
     }
 
     unsafe fn put_at_empty(&mut self, bucket: Bucket<K, V>, idx: usize) {
-        println!("inserting {:?}=>{:?} at {}", bucket.key, bucket.value, idx);
-        let p = self.entries.offset(idx as isize);
+        //println!("inserting {:?}=>{:?} at {}", bucket.key, bucket.value, idx);
+        let p = self.buckets.offset(idx as isize);
         ptr::write(p, bucket);
         self.present.set(idx, true);
     }
@@ -198,18 +150,18 @@ impl <K: Hash+Eq+::std::fmt::Debug, V: ::std::fmt::Debug> Table<K, V> {
     fn resize<H: HashState>(&mut self, hash_state: &H) {
         let used = self.present.iter().filter(|&x| x).count() as f64;
         let load_factor = used / (self.present.len() as f64);
-        println!("resizing at load factor {}", load_factor);
-        let len = self.present.len();
+        //println!("resizing at load factor {}", load_factor);
+        let len = self.bucket_count();
         let new_len = max(len.checked_add(len).expect("size overflow"), MIN_LEN);
         if new_len as u64 > MAX_LEN {
             panic!("requested size: {}, max size: {}", new_len, MAX_LEN);
         }
-        println!("resize {} => {}", len, new_len);
+        //println!("resize {} => {}", len, new_len);
         let mut new_table = Table::new(new_len);
         unsafe {
             for (i, _) in self.present.iter().enumerate().filter(|&(_, x)| x) {
                 let mut hasher = hash_state.hasher();
-                let slot = self.entries.offset(i as isize);
+                let slot = self.buckets.offset(i as isize);
                 (*slot).key.hash(&mut hasher);
                 let hash = hasher.finish();
                 new_table.put(ptr::read(&mut (*slot).key as *mut K),   // slot->key
@@ -217,20 +169,20 @@ impl <K: Hash+Eq+::std::fmt::Debug, V: ::std::fmt::Debug> Table<K, V> {
                               hash, hash_state, |_, _| { }, true);
             }
             let old_size = len * size_of::<Bucket<K, V>>();
-            println!("deallocating table during resize 0x{:x}, {}", self.entries as usize, len);
-            deallocate(self.entries as *mut u8, old_size, table_align::<K, V>());
-            self.entries = ptr::null_mut();
+            //println!("deallocating table during resize 0x{:x}, {}", self.buckets as usize, len);
+            deallocate(self.buckets as *mut u8, old_size, table_align::<K, V>());
+            self.buckets = ptr::null_mut();
         }
         mem::swap(self, &mut new_table);
     }
 
     fn dump_table(&self) {
         unsafe {
-            let table = ::std::slice::from_raw_parts(self.entries, self.present.len());
+            let table = ::std::slice::from_raw_parts(self.buckets, self.bucket_count());
             for (i, e) in table.iter().enumerate() {
                 if self.present[i] {
-                    println!("{}:\t{:?}\t=>\t{:?}\tdisplacement = {}\thome = {}",
-                            i, e.key, e.value, e.displacement, i - e.displacement as usize);
+                    println!("{}:\t{:?}\t=>\t{:?}",
+                            i, e.key, e.value,);
                 } else {
                     println!("{}:\tempty", i);
                 }
@@ -239,17 +191,62 @@ impl <K: Hash+Eq+::std::fmt::Debug, V: ::std::fmt::Debug> Table<K, V> {
     }
 }
 
-impl <K, V> Drop for Table<K, V> {
-    fn drop(&mut self) {
-        if self.entries.is_null() {
-            return;
+impl <K, V> Table<K, V> {
+    pub fn bucket_count(&self) -> usize {
+        self.present.len()
+    }
+
+    /// Used to implement iteration.
+    /// Search for a present bucket >= idx.
+    /// If one is found, Some(..) is returned and idx is set to a value
+    /// that can be passed back to iter_advance to look for the next bucket.
+    /// When all bucket have been scanned, idx is set to bucket_count().
+    pub fn iter_advance<'a>(&'a self, idx: &mut usize) -> Option<(&'a K, &'a V)> {
+        if *idx >= self.bucket_count() {
+            return None;
         }
-        println!("dropping table 0x{:x}, {}", self.entries as usize, self.present.len());
-        unsafe {
-            for (i, _) in self.present.iter().enumerate().filter(|&(_, x)| x) {
-                drop::<Bucket<K, V>>(ptr::read(self.entries.offset(i as isize)));
+        for i in *idx..self.bucket_count() {
+            if self.is_present(i) {
+                *idx = i + 1;
+                let entry = unsafe {
+                    let bucket = self.buckets.offset(i as isize);
+                    (&(*bucket).key, &(*bucket).value)
+                };
+                return Some(entry);
             }
-            deallocate(self.entries as *mut u8, self.present.len() * size_of::<Bucket<K, V>>(), table_align::<K, V>());
+        }
+        *idx = self.bucket_count();
+        return None;
+    }
+
+    fn is_present(&self, idx: usize) -> bool {
+        self.present[idx]
+    }
+
+    fn is_deleted(&self, idx: usize) -> bool {
+        !self.is_present(idx) && unsafe {
+            ptr::read(self.buckets.offset(idx as isize) as *const u8) != TOMBSTONE
         }
     }
 }
+
+impl <K, V> Drop for Table<K, V> {
+    fn drop(&mut self) {
+        if self.buckets.is_null() {
+            return;
+        }
+        // Can't call the bucket_count() method here due to lack of restrictions on K and V
+        //println!("dropping table 0x{:x}, {}", self.buckets as usize, self.bucket_count());
+        unsafe {
+            for (i, _) in self.present.iter().enumerate().filter(|&(_, x)| x) {
+                drop::<Bucket<K, V>>(ptr::read(self.buckets.offset(i as isize)));
+            }
+            let size = self.bucket_count() * size_of::<Bucket<K, V>>();
+            deallocate(self.buckets as *mut u8, size, table_align::<K, V>());
+        }
+    }
+}
+
+unsafe impl <K, V> Sync for Table<K, V> { }
+
+unsafe impl <K, V> Send for Table<K, V> { }

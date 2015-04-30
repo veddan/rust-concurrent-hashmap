@@ -3,5 +3,11 @@ name = "concurrent-hashmap"
 version = "0.0.1"
 authors = ["Viktor Dahl <pazaconyoman@gmail.com>"]
 
+[dev-dependencies]
+rand = '*'
+
 [profile.test]
 opt-level = 1
+
+[profile.bench]
+debug = true
