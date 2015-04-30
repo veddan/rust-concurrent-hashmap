@@ -5,6 +5,8 @@ use std::sync::{RwLock, RwLockReadGuard};
 use std::default::Default;
 use std::num::ToPrimitive;
 use std::mem::replace;
+use std::cmp::min;
+use std::u16;
 use table::*;
 
 // This is the user-facing part of the implementation.
@@ -81,8 +83,23 @@ impl <K: Hash + Eq + ::std::fmt::Debug, V: ::std::fmt::Debug, S: HashState> Conc
     }
 }
 
-impl <K, V> ConcHashMap<K, V> {
-    pub fn iter<'a>(&'a self) -> Entries<'a, K, V> {
+impl <K: Hash + Eq + Clone + ::std::fmt::Debug, V: Clone + ::std::fmt::Debug, S: HashState + Clone>
+        Clone for ConcHashMap<K, V, S> {
+    fn clone(&self) -> ConcHashMap<K, V, S> {
+        let clone = ConcHashMap::<K, V, S>::with_options(Options {
+            capacity: 16,  // TODO
+            hash_state: self.hash_state.clone(),
+            concurrency: min(u16::MAX as usize, self.tables.len()) as u16
+        });
+        for (k, v) in self.iter() {
+            clone.insert(k.clone(), v.clone());
+        }
+        return clone;
+    }
+}
+
+impl <K, V, S> ConcHashMap<K, V, S> {
+    pub fn iter<'a>(&'a self) -> Entries<'a, K, V, S> {
        Entries {
            map: self,
            table: self.tables[0].read().unwrap(),
@@ -98,14 +115,14 @@ impl <K: Hash + Eq+ ::std::fmt::Debug, V: ::std::fmt::Debug, S: HashState+Defaul
     }
 }
 
-pub struct Entries<'a, K: 'a, V: 'a> {
-    map: &'a ConcHashMap<K, V>,
+pub struct Entries<'a, K: 'a, V: 'a, S: 'a> {
+    map: &'a ConcHashMap<K, V, S>,
     table: RwLockReadGuard<'a, Table<K, V>>,
     table_idx: usize,
     bucket: usize,
 }
 
-impl <'a, K, V> Entries<'a, K, V> {
+impl <'a, K, V, S> Entries<'a, K, V, S> {
     fn next_table(&mut self) {
         self.table_idx += 1;
         self.table = self.map.tables[self.table_idx].read().unwrap();
@@ -113,7 +130,7 @@ impl <'a, K, V> Entries<'a, K, V> {
     }
 }
 
-impl <'a, K, V> Iterator for Entries<'a, K, V> {
+impl <'a, K, V, S> Iterator for Entries<'a, K, V, S> {
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<(&'a K, &'a V)> {
@@ -270,6 +287,18 @@ mod test {
     fn find_none_on_empty() {
         let map: ConcHashMap<i32, i32> = Default::default();
         assert!(map.find(&1).is_none());
+    }
+
+    #[test]
+    fn test_clone() {
+        let orig: ConcHashMap<i32, i32> = Default::default();
+        for i in 0..100 {
+            orig.insert(i, i * i);
+        }
+        let clone = orig.clone();
+        for i in 0..100 {
+            assert_eq!(orig.find(&i).unwrap().get(), clone.find(&i).unwrap().get());
+        }
     }
 
     fn find_assert<K: Eq+Hash+Debug, V: Eq+Debug, S: HashState>(map: &ConcHashMap<K, V, S>, key: &K,
