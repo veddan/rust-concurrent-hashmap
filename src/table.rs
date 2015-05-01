@@ -134,6 +134,21 @@ impl <K: Hash+Eq+::std::fmt::Debug, V: ::std::fmt::Debug> Table<K, V> {
         }
     }
 
+    pub fn remove(&mut self, key: &K, hash: u64) -> Option<V> {
+        let i = match self.lookup(key, hash) {
+            Some(i) => i,
+            None    => return None
+        };
+        unsafe {
+            let bucketptr = self.buckets.offset(i as isize);
+            let bucket = ptr::read(bucketptr);
+            ptr::write(bucketptr as *mut u8, TOMBSTONE);
+            self.present.set(i, false);
+            return Some(bucket.value);
+        }
+    }
+
+    #[inline]
     fn compare_key_at(&self, key: &K, idx: usize) -> bool {
         assert!(self.present[idx]);
         unsafe { &(*self.buckets.offset(idx as isize)).key == key }
@@ -236,7 +251,7 @@ impl <K, V> Table<K, V> {
 
     fn is_deleted(&self, idx: usize) -> bool {
         !self.is_present(idx) && unsafe {
-            ptr::read(self.buckets.offset(idx as isize) as *const u8) != TOMBSTONE
+            ptr::read(self.buckets.offset(idx as isize) as *const u8) == TOMBSTONE
         }
     }
 }
@@ -246,8 +261,6 @@ impl <K, V> Drop for Table<K, V> {
         if self.buckets.is_null() {
             return;
         }
-        // Can't call the bucket_count() method here due to lack of restrictions on K and V
-        //println!("dropping table 0x{:x}, {}", self.buckets as usize, self.bucket_count());
         unsafe {
             for (i, _) in self.present.iter().enumerate().filter(|&(_, x)| x) {
                 drop::<Bucket<K, V>>(ptr::read(self.buckets.offset(i as isize)));

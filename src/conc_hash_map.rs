@@ -26,6 +26,10 @@ pub struct ConcHashMap<K, V, S=RandomState> {
 
 impl <K: Hash + Eq + ::std::fmt::Debug, V: ::std::fmt::Debug, S: HashState> ConcHashMap<K, V, S> {
 
+    pub fn new() -> ConcHashMap<K, V> {
+        Default::default()
+    }
+
     pub fn with_options(opts: Options<S>) -> ConcHashMap<K, V, S> {
         let capacity = (opts.capacity as f64 / 0.92).to_usize().expect("capacity overflow");
         let conc = opts.concurrency as usize;
@@ -68,8 +72,11 @@ impl <K: Hash + Eq + ::std::fmt::Debug, V: ::std::fmt::Debug, S: HashState> Conc
         table.put(key, value, hash, &self.hash_state, |old, _| { updater(old); }, false);
     }
 
-    pub fn remove(&self, _key: &K) {
-        panic!()
+    pub fn remove(&self, key: &K) -> Option<V> {
+        let hash = self.hash(key);
+        let table_idx = self.table_for(hash);
+        let mut table = self.tables[table_idx].write().unwrap();
+        table.remove(key, hash)
     }
 
     fn table_for(&self, hash: u64) -> usize {
@@ -317,6 +324,67 @@ mod test {
         map.clear();
         for i in 0..100 {
             assert!(map.find(&i).is_none());
+        }
+    }
+
+    #[test]
+    fn test_remove() {
+        let map: ConcHashMap<i32, String> = Default::default();
+        map.insert(1, "one".to_string());
+        map.insert(2, "two".to_string());
+        map.insert(3, "three".to_string());
+        assert_eq!(Some("two".to_string()), map.remove(&2));
+        assert_eq!("one", map.find(&1).unwrap().get());
+        assert!(map.find(&2).is_none());
+        assert_eq!("three", map.find(&3).unwrap().get());
+    }
+
+    #[test]
+    fn test_remove_many() {
+        let map: ConcHashMap<i32, String> = Default::default();
+        for i in 0..100 {
+            map.insert(i, (i * i).to_string());
+        }
+        for i in 0..100 {
+            if i % 2 == 0 {
+                assert_eq!(Some((i * i).to_string()), map.remove(&i));
+            }
+        }
+        for i in 0..100 {
+            let x = map.find(&i);
+            if i % 2 == 0 {
+                assert!(x.is_none());
+            } else {
+                assert_eq!(&(i * i).to_string(), x.unwrap().get());
+            }
+        }
+    }
+
+    #[test]
+    fn test_remove_insert() {
+        let map: ConcHashMap<i32, String> = Default::default();
+        for i in 0..100 {
+            map.insert(i, (i * i).to_string());
+        }
+        for i in 0..100 {
+            if i % 2 == 0 {
+                assert_eq!(Some((i * i).to_string()), map.remove(&i));
+            }
+        }
+        for i in 0..100 {
+            if i % 4 == 0 {
+                map.insert(i, i.to_string());
+            }
+        }
+        for i in 0..100 {
+            let x = map.find(&i);
+            if i % 4 == 0 {
+                assert_eq!(&i.to_string(), x.unwrap().get());
+            } else if i % 2 == 0 {
+                assert!(x.is_none());
+            } else {
+                assert_eq!(&(i * i).to_string(), x.unwrap().get());
+            }
         }
     }
 
