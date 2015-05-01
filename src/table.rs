@@ -9,6 +9,11 @@ use std::mem::{align_of, size_of, drop};
 use std::marker::{Send, Sync};
 use alloc::heap::{allocate, deallocate};
 
+// This is the actual hash table implementation.
+// The Table struct does not have any synchronization; that is handled by the ConHashMap wrapper.
+// It uses open addressing with quadratic probing, with a bitmap for tracking bucket occupancy,
+// and uses tombstones to track deleted entries.
+
 const TOMBSTONE: u8 = 0xDE;
 
 const MIN_LEN: usize = 16;
@@ -22,6 +27,9 @@ const MAX_LEN: u64 = (1 << 48) - 1;
 fn table_align<K, V>() -> usize { max(align_of::<Bucket<K, V>>(), 64) }
 
 unsafe fn alloc_buckets<K, V>(count: usize) -> *mut Bucket<K, V> {
+    if count == 0 {
+        return ptr::null_mut();
+    }
     let alloc_size = match count.checked_mul(size_of::<Bucket<K, V>>()) {
         None    => panic!("allocation size overflow"),
         Some(s) => s
@@ -30,11 +38,18 @@ unsafe fn alloc_buckets<K, V>(count: usize) -> *mut Bucket<K, V> {
     if p.is_null() {
         ::alloc::oom()
     } else {
-        //println!("allocated table 0x{:x}, {}", p as usize, count);
         let buckets = p as *mut Bucket<K, V>;
         ptr::write_bytes(buckets, 0, count);
         buckets
     }
+}
+
+unsafe fn deallocate_buckets<K, V>(buckets: *mut Bucket<K, V>, count: usize) {
+    if buckets.is_null() || count == 0 {
+        return;
+    }
+    let size = count * size_of::<Bucket<K, V>>();
+    deallocate(buckets as *mut u8, size, table_align::<K, V>());
 }
 
 #[derive(Debug)]
@@ -69,9 +84,10 @@ impl <'a, K, V> Accessor<'a, K, V> {
     }
 }
 
-impl <K: Hash+Eq+::std::fmt::Debug, V: ::std::fmt::Debug> Table<K, V> {
+impl <K: Hash+Eq, V> Table<K, V> {
     pub fn new(reserve: usize) -> Table<K, V> {
         assert!(size_of::<Bucket<K, V>>() >= 1);
+        let reserve = if reserve == 0 { 0 } else { reserve.next_power_of_two() };
         Table {
             present: BitVec::from_elem(reserve, false),
             buckets: unsafe { alloc_buckets(reserve) }
@@ -102,12 +118,8 @@ impl <K: Hash+Eq+::std::fmt::Debug, V: ::std::fmt::Debug> Table<K, V> {
         return None;
     }
 
-    pub fn put<H: HashState, T, U: Fn(&mut V, V)-> T,>(&mut self, key: K, value: V, hash: u64, hash_state: &H,
-                                               update: U, is_resize: bool) -> Option<T> {
-        if !is_resize {
-            //println!("thread {:?} inserting {:?} => {:?}", ::std::thread::current().name(), key, value);
-            //self.dump_table();
-        }
+    pub fn put<H: HashState, T, U: Fn(&mut V, V)-> T>(&mut self, key: K, value: V, hash: u64, hash_state: &H,
+                                                      update: U) -> Option<T> {
         if self.bucket_count() == 0 {
             self.resize(hash_state);
         }
@@ -155,20 +167,17 @@ impl <K: Hash+Eq+::std::fmt::Debug, V: ::std::fmt::Debug> Table<K, V> {
     }
 
     unsafe fn put_at_empty(&mut self, bucket: Bucket<K, V>, idx: usize) {
-        //println!("inserting {:?}=>{:?} at {}", bucket.key, bucket.value, idx);
         let p = self.buckets.offset(idx as isize);
         ptr::write(p, bucket);
         self.present.set(idx, true);
     }
 
     fn resize<H: HashState>(&mut self, hash_state: &H) {
-        //println!("resizing at load factor {}", load_factor);
         let len = self.bucket_count();
         let new_len = max(len.checked_add(len).expect("size overflow"), MIN_LEN);
         if new_len as u64 > MAX_LEN {
             panic!("requested size: {}, max size: {}", new_len, MAX_LEN);
         }
-        //println!("resize {} => {}", len, new_len);
         let mut new_table = Table::new(new_len);
         unsafe {
             for (i, _) in self.present.iter().enumerate().filter(|&(_, x)| x) {
@@ -178,29 +187,27 @@ impl <K: Hash+Eq+::std::fmt::Debug, V: ::std::fmt::Debug> Table<K, V> {
                 let hash = hasher.finish();
                 new_table.put(ptr::read(&mut (*slot).key as *mut K),   // slot->key
                               ptr::read(&mut (*slot).value as *mut V), // slot->value
-                              hash, hash_state, |_, _| { }, true);
+                              hash, hash_state, |_, _| { });
             }
-            let old_size = len * size_of::<Bucket<K, V>>();
-            //println!("deallocating table during resize 0x{:x}, {}", self.buckets as usize, len);
-            deallocate(self.buckets as *mut u8, old_size, table_align::<K, V>());
+            deallocate_buckets(self.buckets, self.bucket_count());
             self.buckets = ptr::null_mut();
         }
         mem::swap(self, &mut new_table);
     }
 
-    fn _dump_table(&self) {
-        unsafe {
-            let table = ::std::slice::from_raw_parts(self.buckets, self.bucket_count());
-            for (i, e) in table.iter().enumerate() {
-                if self.present[i] {
-                    println!("{}:\t{:?}\t=>\t{:?}",
-                            i, e.key, e.value,);
-                } else {
-                    println!("{}:\tempty", i);
-                }
-            }
-        }
-    }
+//     fn _dump_table(&self) {
+//         unsafe {
+//             let table = ::std::slice::from_raw_parts(self.buckets, self.bucket_count());
+//             for (i, e) in table.iter().enumerate() {
+//                 if self.present[i] {
+//                     println!("{}:\t{:?}\t=>\t{:?}",
+//                             i, e.key, e.value,);
+//                 } else {
+//                     println!("{}:\tempty", i);
+//                 }
+//             }
+//         }
+//     }
 
     fn _load_factor(&self) -> f64 {
         let used = self.present.iter().filter(|&x| x).count() as f64;
@@ -265,8 +272,7 @@ impl <K, V> Drop for Table<K, V> {
             for (i, _) in self.present.iter().enumerate().filter(|&(_, x)| x) {
                 drop::<Bucket<K, V>>(ptr::read(self.buckets.offset(i as isize)));
             }
-            let size = self.bucket_count() * size_of::<Bucket<K, V>>();
-            deallocate(self.buckets as *mut u8, size, table_align::<K, V>());
+            deallocate_buckets(self.buckets, self.bucket_count());
         }
     }
 }

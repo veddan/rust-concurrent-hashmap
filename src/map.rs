@@ -7,6 +7,7 @@ use std::num::ToPrimitive;
 use std::mem::swap;
 use std::cmp::min;
 use std::u16;
+use std::iter::{FromIterator, IntoIterator};
 use table::*;
 
 // This is the user-facing part of the implementation.
@@ -17,6 +18,7 @@ use table::*;
 // That means that resizing a Table will never cause a key to cross between Tables.
 // Therefore each table can be resized independently.
 
+/// A concurrent hashmap using sharding and reader-writer locking.
 pub struct ConcHashMap<K, V, S=RandomState> {
     tables: Vec<RwLock<Table<K, V>>>,
     hash_state: S,
@@ -24,18 +26,17 @@ pub struct ConcHashMap<K, V, S=RandomState> {
     table_mask: u64,
 }
 
-impl <K: Hash + Eq + ::std::fmt::Debug, V: ::std::fmt::Debug, S: HashState> ConcHashMap<K, V, S> {
+impl <K: Hash + Eq, V, S: HashState> ConcHashMap<K, V, S> {
 
     pub fn new() -> ConcHashMap<K, V> {
         Default::default()
     }
 
     pub fn with_options(opts: Options<S>) -> ConcHashMap<K, V, S> {
-        let capacity = (opts.capacity as f64 / 0.92).to_usize().expect("capacity overflow");
         let conc = opts.concurrency as usize;
         let partitions = conc.checked_next_power_of_two().unwrap_or((conc / 2).next_power_of_two());
-        //println!("partitions: {}", partitions);
-        let reserve = div_ceil(capacity, partitions).next_power_of_two();
+        let capacity = (opts.capacity as f64 / 0.92).to_usize().expect("capacity overflow");
+        let reserve = div_ceil(capacity, partitions);
         let mut tables = Vec::with_capacity(partitions);
         for _ in 0..partitions {
             tables.push(RwLock::new(Table::new(reserve)));
@@ -62,14 +63,14 @@ impl <K: Hash + Eq + ::std::fmt::Debug, V: ::std::fmt::Debug, S: HashState> Conc
         let hash = self.hash(&key);
         let table_idx = self.table_for(hash);
         let mut table = self.tables[table_idx].write().unwrap();
-        table.put(key, value, hash, &self.hash_state, |old, mut new| { swap(old, &mut new); new }, false)
+        table.put(key, value, hash, &self.hash_state, |old, mut new| { swap(old, &mut new); new })
     }
 
     pub fn upsert<U: Fn(&mut V)>(&self, key: K, value: V, updater: &U) {
         let hash = self.hash(&key);
         let table_idx = self.table_for(hash);
         let mut table = self.tables[table_idx].write().unwrap();
-        table.put(key, value, hash, &self.hash_state, |old, _| { updater(old); }, false);
+        table.put(key, value, hash, &self.hash_state, |old, _| { updater(old); });
     }
 
     pub fn remove(&self, key: &K) -> Option<V> {
@@ -90,8 +91,7 @@ impl <K: Hash + Eq + ::std::fmt::Debug, V: ::std::fmt::Debug, S: HashState> Conc
     }
 }
 
-impl <K: Hash + Eq + Clone + ::std::fmt::Debug, V: Clone + ::std::fmt::Debug, S: HashState + Clone>
-        Clone for ConcHashMap<K, V, S> {
+impl <K: Hash + Eq + Clone, V: Clone, S: HashState + Clone> Clone for ConcHashMap<K, V, S> {
     fn clone(&self) -> ConcHashMap<K, V, S> {
         let clone = ConcHashMap::<K, V, S>::with_options(Options {
             capacity: 16,  // TODO
@@ -102,6 +102,21 @@ impl <K: Hash + Eq + Clone + ::std::fmt::Debug, V: Clone + ::std::fmt::Debug, S:
             clone.insert(k.clone(), v.clone());
         }
         return clone;
+    }
+}
+
+impl <K, V, S> FromIterator<(K, V)> for ConcHashMap<K, V, S> where K: Eq + Hash, S: HashState + Default {
+    fn from_iter<T>(iterator: T) -> Self where T: IntoIterator<Item=(K, V)> {
+        let iterator = iterator.into_iter();
+        let mut options: Options<S> = Default::default();
+        if let (_, Some(bound)) = iterator.size_hint() {
+            options.capacity = bound;
+        }
+        let map = ConcHashMap::with_options(options);
+        for (k, v) in iterator {
+            map.insert(k, v);
+        }
+        return map;
     }
 }
 
@@ -122,7 +137,7 @@ impl <K, V, S> ConcHashMap<K, V, S> {
     }
 }
 
-impl <K: Hash + Eq+ ::std::fmt::Debug, V: ::std::fmt::Debug, S: HashState+Default> Default for ConcHashMap<K, V, S> {
+impl <K: Hash + Eq, V, S: HashState+Default> Default for ConcHashMap<K, V, S> {
     fn default() -> ConcHashMap<K, V, S> {
         ConcHashMap::with_options(Default::default())
     }
@@ -177,7 +192,7 @@ pub struct Options<S> {
 impl <S: HashState+Default> Default for Options<S> {
     fn default() -> Options<S> {
         Options {
-            capacity: 16,
+            capacity: 0,
             hash_state: Default::default(),
             concurrency: 4
         }
@@ -385,6 +400,15 @@ mod test {
             } else {
                 assert_eq!(&(i * i).to_string(), x.unwrap().get());
             }
+        }
+    }
+
+    #[test]
+    fn test_from_iterator() {
+        let vec: Vec<(u32, u32)> = (0..100).map(|i| (i, i * i)).collect();
+        let map: ConcHashMap<u32, u32> = vec.iter().map(|x| *x).collect();
+        for &(k, v) in vec.iter() {
+            find_assert(&map, &k, &v);
         }
     }
 
