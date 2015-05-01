@@ -6,7 +6,7 @@
 extern crate alloc;
 
 mod table;
-mod conc_hash_map;
+mod map;
 
-pub use conc_hash_map::*;
+pub use map::*;
 pub use table::Accessor;
