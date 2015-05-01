@@ -271,6 +271,6 @@ impl <K, V> Drop for Table<K, V> {
     }
 }
 
-unsafe impl <K, V> Sync for Table<K, V> { }
+unsafe impl <K, V> Sync for Table<K, V> where K: Send + Sync, V: Send + Sync { }
 
-unsafe impl <K, V> Send for Table<K, V> { }
+unsafe impl <K, V> Send for Table<K, V> where K: Send, V: Send { }
