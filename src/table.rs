@@ -84,7 +84,7 @@ impl <'a, K, V> Accessor<'a, K, V> {
     }
 }
 
-impl <K: Hash+Eq, V> Table<K, V> {
+impl <K, V> Table<K, V> where K: Hash + Eq {
     pub fn new(reserve: usize) -> Table<K, V> {
         assert!(size_of::<Bucket<K, V>>() >= 1);
         let reserve = if reserve == 0 { 0 } else { reserve.next_power_of_two() };
