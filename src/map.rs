@@ -19,14 +19,14 @@ use table::*;
 // Therefore each table can be resized independently.
 
 /// A concurrent hashmap using sharding and reader-writer locking.
-pub struct ConcHashMap<K, V, S=RandomState> {
+pub struct ConcHashMap<K: Send + Sync, V: Send + Sync, S=RandomState> {
     tables: Vec<RwLock<Table<K, V>>>,
     hash_state: S,
     table_shift: u64,
     table_mask: u64,
 }
 
-impl <K: Hash + Eq, V, S: HashState> ConcHashMap<K, V, S> {
+impl <K: Hash + Eq + Send + Sync, V: Send + Sync, S: HashState> ConcHashMap<K, V, S> {
 
     pub fn new() -> ConcHashMap<K, V> {
         Default::default()
@@ -91,7 +91,7 @@ impl <K: Hash + Eq, V, S: HashState> ConcHashMap<K, V, S> {
     }
 }
 
-impl <K: Hash + Eq + Clone, V: Clone, S: HashState + Clone> Clone for ConcHashMap<K, V, S> {
+impl <K: Hash + Eq + Send + Sync + Clone, V: Send + Sync + Clone, S: HashState + Clone> Clone for ConcHashMap<K, V, S> {
     fn clone(&self) -> ConcHashMap<K, V, S> {
         let clone = ConcHashMap::<K, V, S>::with_options(Options {
             capacity: 16,  // TODO
@@ -105,7 +105,7 @@ impl <K: Hash + Eq + Clone, V: Clone, S: HashState + Clone> Clone for ConcHashMa
     }
 }
 
-impl <K, V, S> FromIterator<(K, V)> for ConcHashMap<K, V, S> where K: Eq + Hash, S: HashState + Default {
+impl <K, V, S> FromIterator<(K, V)> for ConcHashMap<K, V, S> where K: Eq + Hash + Send + Sync, V: Send + Sync, S: HashState + Default {
     fn from_iter<T>(iterator: T) -> Self where T: IntoIterator<Item=(K, V)> {
         let iterator = iterator.into_iter();
         let mut options: Options<S> = Default::default();
@@ -120,7 +120,7 @@ impl <K, V, S> FromIterator<(K, V)> for ConcHashMap<K, V, S> where K: Eq + Hash,
     }
 }
 
-impl <K, V, S> ConcHashMap<K, V, S> {
+impl <K: Send + Sync, V: Send + Sync, S> ConcHashMap<K, V, S> {
     pub fn iter<'a>(&'a self) -> Entries<'a, K, V, S> {
        Entries {
            map: self,
@@ -137,20 +137,20 @@ impl <K, V, S> ConcHashMap<K, V, S> {
     }
 }
 
-impl <K: Hash + Eq, V, S: HashState+Default> Default for ConcHashMap<K, V, S> {
+impl <K: Hash + Eq + Send + Sync, V: Send + Sync, S: HashState+Default> Default for ConcHashMap<K, V, S> {
     fn default() -> ConcHashMap<K, V, S> {
         ConcHashMap::with_options(Default::default())
     }
 }
 
-pub struct Entries<'a, K: 'a, V: 'a, S: 'a> {
+pub struct Entries<'a, K: 'a + Send + Sync, V: 'a + Send + Sync, S: 'a> {
     map: &'a ConcHashMap<K, V, S>,
     table: RwLockReadGuard<'a, Table<K, V>>,
     table_idx: usize,
     bucket: usize,
 }
 
-impl <'a, K, V, S> Entries<'a, K, V, S> {
+impl <'a, K: Send + Sync, V: Send + Sync, S> Entries<'a, K, V, S> {
     fn next_table(&mut self) {
         self.table_idx += 1;
         self.table = self.map.tables[self.table_idx].read().unwrap();
@@ -158,7 +158,7 @@ impl <'a, K, V, S> Entries<'a, K, V, S> {
     }
 }
 
-impl <'a, K, V, S> Iterator for Entries<'a, K, V, S> {
+impl <'a, K: Send + Sync, V: Send + Sync, S> Iterator for Entries<'a, K, V, S> {
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<(&'a K, &'a V)> {
@@ -412,8 +412,8 @@ mod test {
         }
     }
 
-    fn find_assert<K: Eq+Hash+Debug, V: Eq+Debug, S: HashState>(map: &ConcHashMap<K, V, S>, key: &K,
-                                                                expected_val: &V) {
+    fn find_assert<K: Eq + Hash + Debug + Send + Sync, V: Eq + Debug + Send + Sync, S: HashState>(
+            map: &ConcHashMap<K, V, S>, key: &K,  expected_val: &V) {
         match map.find(key) {
             None    => panic!("missing key {:?} should map to {:?}", key, expected_val),
             Some(v) => assert_eq!(*v.get(), *expected_val)

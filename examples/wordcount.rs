@@ -13,11 +13,11 @@ use concurrent_hashmap::*;
 
 fn main() {
     let words = read_words();
-    let word_counts: ConcHashMap<&str, u32> = Default::default();
+    let word_counts: ConcHashMap<String, u32> = Default::default();
     count_words(&words, &word_counts, 4);
-    let mut counts: Vec<(&str, u32)> = word_counts.iter().map(|(&s, &n)| (s, n)).collect();
+    let mut counts: Vec<(String, u32)> = word_counts.iter().map(|(s, &n)| (s.clone(), n)).collect();
     counts.sort_by(|&(_, a), &(_, b)| a.cmp(&b));
-    for &(word, count) in counts.iter() {
+    for &(ref word, count) in counts.iter() {
         println!("{}\t{}", word, count);
     }
 }
@@ -29,12 +29,12 @@ fn read_words() -> Vec<String> {
                  .map(|w| w.to_lowercase()).filter(|w| !w.is_empty()).collect()
 }
 
-fn count_words<'a>(words: &'a [String], word_counts: &ConcHashMap<&'a str, u32>, nthreads: usize) {
+fn count_words(words: &[String], word_counts: &ConcHashMap<String, u32>, nthreads: usize) {
     let mut threads = Vec::with_capacity(nthreads);
     for chunk in words.chunks(max(10, words.len() / nthreads)) {
         threads.push(thread::scoped(move || {
             for word in chunk.iter() {
-                word_counts.upsert(word, 1, &|count| *count += 1);
+                word_counts.upsert(String::from_str(word), 1, &|count| *count += 1);
             }
         }));
     }
