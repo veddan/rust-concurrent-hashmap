@@ -1,9 +1,9 @@
 #![feature(std_misc)]
 #![feature(alloc)]
-#![feature(collections)]
 #![feature(core)]
 
 extern crate alloc;
+extern crate num;
 
 mod table;
 mod map;
