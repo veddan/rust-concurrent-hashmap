@@ -3,11 +3,11 @@ use std::collections::hash_state::HashState;
 use std::collections::hash_map::RandomState;
 use std::sync::{RwLock, RwLockReadGuard};
 use std::default::Default;
-use std::num::ToPrimitive;
 use std::mem::swap;
 use std::cmp::min;
 use std::u16;
 use std::iter::{FromIterator, IntoIterator};
+use num::ToPrimitive;
 use table::*;
 
 // This is the user-facing part of the implementation.
@@ -49,6 +49,7 @@ impl <K, V, S> ConcHashMap<K, V, S> where K: Hash + Eq + Send + Sync, V: Send + 
         }
     }
 
+    #[inline(never)]
     pub fn find<'a>(&'a self, key: &K) -> Option<Accessor<'a, K, V>> {
         let hash = self.hash(key);
         let table_idx = self.table_for(hash);
@@ -59,18 +60,19 @@ impl <K, V, S> ConcHashMap<K, V, S> where K: Hash + Eq + Send + Sync, V: Send + 
         }
     }
 
+    #[inline(never)]
     pub fn insert(&self, key: K, value: V) -> Option<V> {
         let hash = self.hash(&key);
         let table_idx = self.table_for(hash);
         let mut table = self.tables[table_idx].write().unwrap();
-        table.put(key, value, hash, &self.hash_state, |old, mut new| { swap(old, &mut new); new })
+        table.put(key, value, hash, |old, mut new| { swap(old, &mut new); new })
     }
 
     pub fn upsert<U: Fn(&mut V)>(&self, key: K, value: V, updater: &U) {
         let hash = self.hash(&key);
         let table_idx = self.table_for(hash);
         let mut table = self.tables[table_idx].write().unwrap();
-        table.put(key, value, hash, &self.hash_state, |old, _| { updater(old); });
+        table.put(key, value, hash, |old, _| { updater(old); });
     }
 
     pub fn remove(&self, key: &K) -> Option<V> {
@@ -166,7 +168,7 @@ impl <'a, K, V, S> Iterator for Entries<'a, K, V, S> where K: Send + Sync, V: Se
 
     fn next(&mut self) -> Option<(&'a K, &'a V)> {
         loop {
-            if self.bucket == self.table.bucket_count() {
+            if self.bucket == self.table.capacity() {
                 if self.table_idx + 1 == self.map.tables.len() {
                     return None;
                 }
