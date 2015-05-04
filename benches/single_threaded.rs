@@ -108,19 +108,16 @@ fn random_integer_lookup(hit_rate: f64, b: &mut Bencher) {
     }
     let base_n = 1000;
     let n = max(1, base_n - (0.99 * base_n as f64 * (1.0 - hit_rate / 100.0)) as u32);
-    if hit_rate > 0.0 {
-        let max = (INTEGERS as f64 / (hit_rate / 100.0)) as u32;
-        b.iter(||
-            for _ in 0..n {
-                test::black_box(map.find(&rng.gen_range(0, max)));
-            }
-        );
+    let (min, max) = if hit_rate > 0.0 {
+        (0, (INTEGERS as f64 / (hit_rate / 100.0)) as u32)
     } else {
-        b.iter(||
-            for _ in 0..n {
-                test::black_box(map.find(&rng.gen_range(INTEGERS, 2 * INTEGERS)));
-            }
-        );
-    }
-    b.bytes = n as u64 * INTEGERS as u64;
+        (INTEGERS, 2 * INTEGERS)
+    };
+    let keys: Vec<_> = (0..n).map(|_| rng.gen_range(min, max)).collect();
+    b.iter(||
+        for key in keys.iter() {
+            test::black_box(map.find(key));
+        }
+    );
+    b.bytes = n as u64 as u64;
 }
