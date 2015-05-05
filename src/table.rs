@@ -110,9 +110,10 @@ impl <K, V> Table<K, V> where K: Hash + Eq {
             return None;
         }
         let mask = len - 1;
-        let hash = (hash & HASH_MASK) as usize;
-        let mut i = hash & mask;
+        let mut i = (hash & HASH_MASK) as usize & mask;
         let mut j = 0;
+        // TODO We could be clever here, and first search for a matching hash.
+        // Only then do we need to start comparing keys.
         loop {
             if self.is_present(i) && self.compare_key_at(key, i) {
                 return Some(i);
@@ -260,14 +261,17 @@ impl <K, V> Table<K, V> {
 
     fn is_present(&self, idx: usize) -> bool {
         assert!(idx < self.capacity);
-        unsafe { *self.hashes.offset(idx as isize) & PRESENT != 0 }
+        self.hash_at(idx) & PRESENT != 0
     }
 
     fn is_deleted(&self, idx: usize) -> bool {
         assert!(idx < self.capacity);
-        !self.is_present(idx) && unsafe {
-            *self.hashes.offset(idx as isize) & TOMBSTONE != 0
-        } 
+        !self.is_present(idx) && self.hash_at(idx) & TOMBSTONE != 0
+    }
+
+    fn hash_at(&self, idx: usize) -> u64 {
+        assert!(idx < self.capacity);
+        unsafe { *self.hashes.offset(idx as isize) }
     }
 
     fn foreach_present_idx<F>(&self, mut f: F) where F: FnMut(usize) {
