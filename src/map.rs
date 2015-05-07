@@ -6,6 +6,7 @@ use std::default::Default;
 use std::mem::swap;
 use std::cmp::min;
 use std::u16;
+use std::borrow::Borrow;
 use std::iter::{FromIterator, IntoIterator};
 use num::ToPrimitive;
 use table::*;
@@ -26,7 +27,7 @@ pub struct ConcHashMap<K, V, S=RandomState> where K: Send + Sync, V: Send + Sync
     table_mask: u64,
 }
 
-impl <K, V, S> ConcHashMap<K, V, S> where K: Hash + Eq + Send + Sync, V: Send + Sync, S: HashState{
+impl <K, V, S> ConcHashMap<K, V, S> where K: Hash + Eq + Send + Sync, V: Send + Sync, S: HashState {
 
     pub fn new() -> ConcHashMap<K, V> {
         Default::default()
@@ -50,11 +51,12 @@ impl <K, V, S> ConcHashMap<K, V, S> where K: Hash + Eq + Send + Sync, V: Send + 
     }
 
     #[inline(never)]
-    pub fn find<'a>(&'a self, key: &K) -> Option<Accessor<'a, K, V>> {
+    pub fn find<'a, Q: ?Sized>(&'a self, key: &Q) -> Option<Accessor<'a, K, V>>
+            where K: Borrow<Q> + Hash + Eq + Send + Sync, Q: Hash + Eq + Sync {
         let hash = self.hash(key);
         let table_idx = self.table_for(hash);
         let table = self.tables[table_idx].read().unwrap();
-        match table.lookup(key, hash) {
+        match table.lookup(hash, |k| k.borrow() == key) {
             Some(idx) => Some(Accessor::new(table, idx)),
             None      => None
         }
@@ -75,23 +77,31 @@ impl <K, V, S> ConcHashMap<K, V, S> where K: Hash + Eq + Send + Sync, V: Send + 
         table.put(key, value, hash, |old, _| { updater(old); });
     }
 
-    pub fn remove(&self, key: &K) -> Option<V> {
+    pub fn remove<'a, Q: ?Sized>(&'a self, key: &Q) -> Option<V>
+            where K: Borrow<Q> + Hash + Eq + Send + Sync, Q: Hash + Eq + Sync {
         let hash = self.hash(key);
         let table_idx = self.table_for(hash);
         let mut table = self.tables[table_idx].write().unwrap();
-        table.remove(key, hash)
+        table.remove(hash, |k| k.borrow() == key)
     }
 
     fn table_for(&self, hash: u64) -> usize {
         ((hash >> self.table_shift) & self.table_mask) as usize
     }
 
-    fn hash(&self, key: &K) -> u64 {
+    fn hash<Q: ?Sized>(&self, key: &Q) -> u64
+            where K: Borrow<Q> + Hash + Eq + Send + Sync, Q: Hash + Eq + Sync {
         let mut hasher = self.hash_state.hasher();
         key.hash(&mut hasher);
         hasher.finish()
     }
 }
+
+// impl <K, V, S, Q: ?Sized> Index for ConcHashMap<K, V, S>
+//         where K: Hash + Eq + Send + Sync + Borrow<Q>, V: Send + Sync, S: HashState, Q: E {
+//     type Output = Accessor<K, V>;
+//     type Idx 
+// }
 
 impl <K, V, S> Clone for ConcHashMap<K, V, S>
         where K: Hash + Eq + Send + Sync + Clone, V: Send + Sync + Clone, S: HashState + Clone {
@@ -199,7 +209,7 @@ impl <S> Default for Options<S> where S: HashState+Default {
         Options {
             capacity: 0,
             hash_state: Default::default(),
-            concurrency: 4
+            concurrency: 16
         }
     }
 }

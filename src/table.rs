@@ -104,29 +104,27 @@ impl <K, V> Table<K, V> where K: Hash + Eq {
         }
     }
 
-    pub fn lookup(&self, key: &K, hash: u64) -> Option<usize> {
+    pub fn lookup<C>(&self, hash: u64, eq: C) -> Option<usize> where C: Fn(&K) -> bool {
         let len = self.capacity;
         if len == 0 {
             return None;
         }
         let mask = len - 1;
-        let mut i = (hash & HASH_MASK) as usize & mask;
+        let hash = hash & HASH_MASK;
+        let mut i = hash as usize & mask;
         let mut j = 0;
-        // TODO We could be clever here, and first search for a matching hash.
-        // Only then do we need to start comparing keys.
         loop {
-            if self.is_present(i) && self.compare_key_at(key, i) {
+            if self.is_present(i) && self.compare_key_at(&eq, i) {
                 return Some(i);
             }
             if !self.is_present(i) && !self.is_deleted(i) {
                 // The key we're searching for would have been placed here if it existed
                 return None;
             }
-            if i == len - 1 { break; }
+            if i == len - 1 { return None; }
             j += 1;
             i = (i + j) & mask;
         }
-        return None;
     }
 
     pub fn put<T, U: Fn(&mut V, V)-> T>(&mut self, key: K, value: V, hash: u64, update: U) -> Option<T> {
@@ -135,7 +133,7 @@ impl <K, V> Table<K, V> where K: Hash + Eq {
         }
         loop {
             let len = self.capacity;
-            let hash = (hash & HASH_MASK);
+            let hash = hash & HASH_MASK;
             let mask = len - 1;
             let mut i = (hash as usize) & mask;
             let mut j = 0;
@@ -144,7 +142,7 @@ impl <K, V> Table<K, V> where K: Hash + Eq {
                     unsafe { self.put_at_empty(i, key, value, hash); }
                     self.len += 1;
                     return None;
-                } else if self.compare_key_at(&key, i) {
+                } else if self.compare_key_at(&|k| k == &key, i) {
                     let old_value = unsafe { &mut *self.values.offset(i as isize) };
                     return Some(update(old_value, value));
                 }
@@ -156,8 +154,8 @@ impl <K, V> Table<K, V> where K: Hash + Eq {
         }
     }
 
-    pub fn remove(&mut self, key: &K, hash: u64) -> Option<V> {
-        let i = match self.lookup(key, hash) {
+    pub fn remove<C>(&mut self, hash: u64, eq: C) -> Option<V> where C: Fn(&K) -> bool {
+        let i = match self.lookup(hash, eq) {
             Some(i) => i,
             None    => return None
         };
@@ -171,9 +169,9 @@ impl <K, V> Table<K, V> where K: Hash + Eq {
     }
 
     #[inline]
-    fn compare_key_at(&self, key: &K, idx: usize) -> bool {
+    fn compare_key_at<C>(&self, eq: &C, idx: usize) -> bool where C: Fn(&K) -> bool {
         assert!(self.is_present(idx));
-        unsafe { &*self.keys.offset(idx as isize) == key }
+        unsafe { eq(&*self.keys.offset(idx as isize)) }
     }
 
     unsafe fn put_at_empty(&mut self, idx: usize, key: K, value: V, hash: u64) {
