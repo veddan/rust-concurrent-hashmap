@@ -1,6 +1,5 @@
 #![feature(std_misc)]
 #![feature(alloc)]
-#![feature(core)]
 
 extern crate alloc;
 extern crate num;

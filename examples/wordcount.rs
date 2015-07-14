@@ -1,11 +1,9 @@
-#![feature(str_words)]
 #![feature(scoped)]
-#![feature(collections)]
 
 extern crate concurrent_hashmap;
 
 use std::cmp::max;
-use std::io::{Read};
+use std::io::Read;
 use std::io;
 use std::thread;
 use std::default::Default;
@@ -25,8 +23,12 @@ fn main() {
 fn read_words() -> Vec<String> {
     let mut input = String::new();
     io::stdin().read_to_string(&mut input).unwrap();
-    input.words().map(|w| w.trim_matches(|c| ['.', '"', ':', ';', ',', '!', '?', ')', '(', '_'].contains(&c)))
-                 .map(|w| w.to_lowercase()).filter(|w| !w.is_empty()).collect()
+    input.split_whitespace()
+        .map(|w| w.trim_matches(|c| ['.', '"', ':', ';', ',', '!', '?', ')', '(', '_']
+                  .contains(&c)))
+        .map(|w| w.to_lowercase())
+        .filter(|w| !w.is_empty())
+        .collect()
 }
 
 fn count_words(words: &[String], word_counts: &ConcHashMap<String, u32>, nthreads: usize) {
@@ -34,7 +36,9 @@ fn count_words(words: &[String], word_counts: &ConcHashMap<String, u32>, nthread
     for chunk in words.chunks(max(10, words.len() / nthreads)) {
         threads.push(thread::scoped(move || {
             for word in chunk.iter() {
-                word_counts.upsert(String::from_str(word), 1, &|count| *count += 1);
+                // It would be nice to be able to pass a &K to .upsert()
+                // and have it clone as needed instead of passing a K.
+                word_counts.upsert(word.to_owned(), 1, &|count| *count += 1);
             }
         }));
     }
