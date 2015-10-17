@@ -1,18 +1,18 @@
-#![feature(scoped)]
-
+#![feature(step_by)]
 extern crate concurrent_hashmap;
 
-use std::cmp::max;
 use std::io::Read;
 use std::io;
+use std::cmp;
 use std::thread;
 use std::default::Default;
+use std::sync::Arc;
 use concurrent_hashmap::*;
 
 fn main() {
-    let words = read_words();
-    let word_counts: ConcHashMap<String, u32> = Default::default();
-    count_words(&words, &word_counts, 4);
+    let words = Arc::new(read_words());
+    let word_counts: Arc<ConcHashMap<String, u32>> = Default::default();
+    count_words(words.clone(), word_counts.clone(), 4);
     let mut counts: Vec<(String, u32)> = word_counts.iter().map(|(s, &n)| (s.clone(), n)).collect();
     counts.sort_by(|&(_, a), &(_, b)| a.cmp(&b));
     for &(ref word, count) in counts.iter() {
@@ -31,15 +31,21 @@ fn read_words() -> Vec<String> {
         .collect()
 }
 
-fn count_words(words: &[String], word_counts: &ConcHashMap<String, u32>, nthreads: usize) {
+fn count_words(words: Arc<Vec<String>>, word_counts: Arc<ConcHashMap<String, u32>>, nthreads: usize) {
     let mut threads = Vec::with_capacity(nthreads);
-    for chunk in words.chunks(max(10, words.len() / nthreads)) {
-        threads.push(thread::scoped(move || {
-            for word in chunk.iter() {
+    let chunk_size = words.len() / nthreads;
+    for chunk_index in (0..words.len()).step_by(chunk_size) {
+        let words = words.clone(); 
+        let word_counts = word_counts.clone(); 
+        threads.push(thread::spawn(move || {
+            for word in &words[chunk_index..cmp::min(words.len(), chunk_index + chunk_size)] {
                 // It would be nice to be able to pass a &K to .upsert()
                 // and have it clone as needed instead of passing a K.
                 word_counts.upsert(word.to_owned(), 1, &|count| *count += 1);
             }
         }));
+    }
+    for thread in threads {
+        thread.join().unwrap();
     }
 }

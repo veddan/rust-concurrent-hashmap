@@ -5,6 +5,7 @@ authors = ["Viktor Dahl <pazaconyoman@gmail.com>"]
 
 [dependencies]
 num = '*'
+spin = '0.3'
 
 [dev-dependencies]
 rand = '*'

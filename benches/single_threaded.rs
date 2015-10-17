@@ -1,5 +1,7 @@
 #![feature(test)]
 #![feature(std_misc)]
+#![feature(hashmap_hasher)]
+
 
 extern crate rand;
 extern crate test;
@@ -10,14 +12,15 @@ use std::cmp::max;
 use test::Bencher;
 use rand::{Rng, weak_rng};
 use concurrent_hashmap::*;
+use std::collections::HashMap;
 
 const INTEGERS: u32 = 100_000;
 
 macro_rules! new_map (
     ($typ: ty) => ({
         let mut options: Options<::std::collections::hash_map::RandomState> = Default::default();
-        options.concurrency = 1;
-        ConcHashMap::<$typ, i8, _>::with_options(options)
+        options.concurrency = 4;
+        ConcHashMap::<$typ, usize, _>::with_options(options)
     })
 );
 

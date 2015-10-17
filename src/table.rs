@@ -1,5 +1,5 @@
 use std::hash::{Hash};
-use std::sync::{RwLockReadGuard};
+use spin::{RwLockReadGuard};
 use std::ptr;
 use std::mem;
 use std::cmp::{max};
