@@ -7,7 +7,7 @@ authors = ["Viktor Dahl <pazaconyoman@gmail.com>"]
 spin = '0.3'
 
 [dev-dependencies]
-rand = '*'
+rand = '0.3.11'
 
 [profile.test]
 opt-level = 1
