@@ -1,7 +1,7 @@
 use std::hash::{Hasher, Hash};
 use std::collections::hash_state::HashState;
 use std::collections::hash_map::RandomState;
-use std::sync::{RwLock, RwLockReadGuard};
+use spin::{RwLock, RwLockReadGuard};
 use std::default::Default;
 use std::mem::swap;
 use std::cmp::min;
@@ -55,7 +55,7 @@ impl <K, V, S> ConcHashMap<K, V, S> where K: Hash + Eq + Send + Sync, V: Send + 
             where K: Borrow<Q> + Hash + Eq + Send + Sync, Q: Hash + Eq + Sync {
         let hash = self.hash(key);
         let table_idx = self.table_for(hash);
-        let table = self.tables[table_idx].read().unwrap();
+        let table = self.tables[table_idx].read();
         match table.lookup(hash, |k| k.borrow() == key) {
             Some(idx) => Some(Accessor::new(table, idx)),
             None      => None
@@ -66,14 +66,14 @@ impl <K, V, S> ConcHashMap<K, V, S> where K: Hash + Eq + Send + Sync, V: Send + 
     pub fn insert(&self, key: K, value: V) -> Option<V> {
         let hash = self.hash(&key);
         let table_idx = self.table_for(hash);
-        let mut table = self.tables[table_idx].write().unwrap();
+        let mut table = self.tables[table_idx].write();
         table.put(key, value, hash, |old, mut new| { swap(old, &mut new); new })
     }
 
     pub fn upsert<U: Fn(&mut V)>(&self, key: K, value: V, updater: &U) {
         let hash = self.hash(&key);
         let table_idx = self.table_for(hash);
-        let mut table = self.tables[table_idx].write().unwrap();
+        let mut table = self.tables[table_idx].write();
         table.put(key, value, hash, |old, _| { updater(old); });
     }
 
@@ -81,7 +81,7 @@ impl <K, V, S> ConcHashMap<K, V, S> where K: Hash + Eq + Send + Sync, V: Send + 
             where K: Borrow<Q> + Hash + Eq + Send + Sync, Q: Hash + Eq + Sync {
         let hash = self.hash(key);
         let table_idx = self.table_for(hash);
-        let mut table = self.tables[table_idx].write().unwrap();
+        let mut table = self.tables[table_idx].write();
         table.remove(hash, |k| k.borrow() == key)
     }
 
@@ -138,7 +138,7 @@ impl <K, V, S> ConcHashMap<K, V, S> where K: Send + Sync, V: Send + Sync {
     pub fn iter<'a>(&'a self) -> Entries<'a, K, V, S> {
        Entries {
            map: self,
-           table: self.tables[0].read().unwrap(),
+           table: self.tables[0].read(),
            table_idx: 0,
            bucket: 0
        }
@@ -146,7 +146,7 @@ impl <K, V, S> ConcHashMap<K, V, S> where K: Send + Sync, V: Send + Sync {
 
     pub fn clear(&self) {
         for table in self.tables.iter() {
-            table.write().unwrap().clear();
+            table.write().clear();
         }
     }
 }
@@ -168,7 +168,7 @@ pub struct Entries<'a, K, V, S> where K: 'a + Send + Sync, V: 'a + Send + Sync, 
 impl <'a, K, V, S> Entries<'a, K, V, S> where K: Send + Sync, V: Send + Sync  {
     fn next_table(&mut self) {
         self.table_idx += 1;
-        self.table = self.map.tables[self.table_idx].read().unwrap();
+        self.table = self.map.tables[self.table_idx].read();
         self.bucket = 0;
     }
 }

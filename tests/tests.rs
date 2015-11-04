@@ -1,5 +1,3 @@
-#![feature(scoped)]
-
 extern crate rand;
 extern crate concurrent_hashmap;
 
@@ -21,7 +19,7 @@ fn many_threads() {
     let max = nthreads * n;
     for t in 0..nthreads {
         let map = map.clone();
-        threads.push(thread::scoped(move || {
+        threads.push(thread::spawn(move || {
             let mut rng = weak_rng();
             let s = t * n;
             for i in s..s + n {
@@ -36,7 +34,7 @@ fn many_threads() {
         }));
     }
     for thread in threads {
-        assert_eq!(thread.join(), Ok(()));
+        assert_eq!(thread.join().unwrap(), Ok(()));
     }
 }
 
@@ -68,19 +66,21 @@ fn count_compare_with_sequential() {
         return map;
     }
 
-    fn count_par(nums: &[u32]) -> ConcHashMap<u32, u32> {
-        let map: ConcHashMap<u32, u32> = Default::default();
-        {
-            let map = &map;
-            let mut threads = Vec::new();
-            for ns in nums.chunks(nums.len() / 4) {
-                threads.push(thread::scoped(move || {
-                    for &num in ns.iter() {
-                        map.upsert(num, 1, &|count| *count += 1);
-                    }
-                }));
-            }
+    fn count_par(nums: &[u32]) -> Arc<ConcHashMap<u32, u32>> {
+        let map: Arc<ConcHashMap<u32, u32>> = Default::default();
+        let mut threads = Vec::new();
+        for ns in nums.chunks(nums.len() / 4) {
+            let map = map.clone();
+            let ns = ns.iter().cloned().collect::<Vec<_>>();
+            threads.push(thread::spawn(move || {
+                for &num in ns.iter() {
+                    map.upsert(num, 1, &|count| *count += 1);
+                }
+            }));
         }
-        return map;
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        map
     }
 }
