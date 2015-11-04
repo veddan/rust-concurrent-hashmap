@@ -35,8 +35,8 @@ fn count_words(words: Arc<Vec<String>>, word_counts: Arc<ConcHashMap<String, u32
     let mut threads = Vec::with_capacity(nthreads);
     let chunk_size = words.len() / nthreads;
     for chunk_index in (0..words.len()).step_by(chunk_size) {
-        let words = words.clone(); 
-        let word_counts = word_counts.clone(); 
+        let words = words.clone();
+        let word_counts = word_counts.clone();
         threads.push(thread::spawn(move || {
             for word in &words[chunk_index..cmp::min(words.len(), chunk_index + chunk_size)] {
                 // It would be nice to be able to pass a &K to .upsert()

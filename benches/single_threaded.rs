@@ -1,7 +1,5 @@
 #![feature(test)]
-#![feature(std_misc)]
 #![feature(hashmap_hasher)]
-
 
 extern crate rand;
 extern crate test;
@@ -12,7 +10,6 @@ use std::cmp::max;
 use test::Bencher;
 use rand::{Rng, weak_rng, XorShiftRng};
 use concurrent_hashmap::*;
-use std::collections::HashMap;
 
 const INTEGERS: u32 = 100_000;
 

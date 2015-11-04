@@ -96,12 +96,6 @@ impl <K, V, S> ConcHashMap<K, V, S> where K: Hash + Eq + Send + Sync, V: Send + 
     }
 }
 
-// impl <K, V, S, Q: ?Sized> Index for ConcHashMap<K, V, S>
-//         where K: Hash + Eq + Send + Sync + Borrow<Q>, V: Send + Sync, S: HashState, Q: E {
-//     type Output = Accessor<K, V>;
-//     type Idx 
-// }
-
 impl <K, V, S> Clone for ConcHashMap<K, V, S>
         where K: Hash + Eq + Send + Sync + Clone, V: Send + Sync + Clone, S: HashState + Clone {
     fn clone(&self) -> ConcHashMap<K, V, S> {
@@ -263,7 +257,7 @@ mod test {
             }
         }
 
-        fn finish(&self) -> u64 { 
+        fn finish(&self) -> u64 {
             let mut hash = self.state;
             hash = hash.wrapping_add(hash << 3);
             hash ^= hash >> 11;
