@@ -4,7 +4,6 @@ version = "0.0.1"
 authors = ["Viktor Dahl <pazaconyoman@gmail.com>"]
 
 [dependencies]
-num = '*'
 spin = '0.3'
 
 [dev-dependencies]

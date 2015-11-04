@@ -8,7 +8,6 @@ use std::cmp::min;
 use std::u16;
 use std::borrow::Borrow;
 use std::iter::{FromIterator, IntoIterator};
-use num::ToPrimitive;
 use table::*;
 
 // This is the user-facing part of the implementation.
@@ -36,7 +35,7 @@ impl <K, V, S> ConcHashMap<K, V, S> where K: Hash + Eq + Send + Sync, V: Send + 
     pub fn with_options(opts: Options<S>) -> ConcHashMap<K, V, S> {
         let conc = opts.concurrency as usize;
         let partitions = conc.checked_next_power_of_two().unwrap_or((conc / 2).next_power_of_two());
-        let capacity = (opts.capacity as f64 / 0.92).to_usize().expect("capacity overflow");
+        let capacity = f64_to_usize(opts.capacity as f64 / 0.92).expect("capacity overflow");
         let reserve = div_ceil(capacity, partitions);
         let mut tables = Vec::with_capacity(partitions);
         for _ in 0..partitions {
@@ -219,6 +218,14 @@ fn div_ceil(n: usize, d: usize) -> usize {
         0
     } else {
         n/d + if n % d == 0 { 1 } else { 0 }
+    }
+}
+
+fn f64_to_usize(f: f64) -> Option<usize> {
+    if f.is_nan() || f.is_sign_negative() || f > ::std::usize::MAX as f64 {
+        None
+    } else {
+        Some(f as usize)
     }
 }
 

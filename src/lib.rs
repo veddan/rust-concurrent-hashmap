@@ -4,7 +4,6 @@
 #![feature(oom)]
 
 extern crate alloc;
-extern crate num;
 extern crate spin;
 
 mod table;
