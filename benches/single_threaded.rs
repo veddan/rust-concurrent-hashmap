@@ -10,7 +10,7 @@ extern crate concurrent_hashmap;
 use std::default::Default;
 use std::cmp::max;
 use test::Bencher;
-use rand::{Rng, weak_rng};
+use rand::{Rng, weak_rng, XorShiftRng};
 use concurrent_hashmap::*;
 use std::collections::HashMap;
 
@@ -55,7 +55,7 @@ fn insert_random_integers(b: &mut Bencher) {
 #[bench]
 #[inline(never)]
 fn insert_sequential_strings(b: &mut Bencher) {
-    let strings: Vec<_> = (0..INTEGERS).map(|i| i.to_string()).collect();
+    let strings: Vec<_> = (0..INTEGERS as u64).map(|i| (i * i).to_string()).collect();
     b.iter(|| {
         let map = new_map!(&str);
         for i in strings.iter() {
@@ -69,7 +69,7 @@ fn insert_sequential_strings(b: &mut Bencher) {
 #[bench]
 #[inline(never)]
 fn insert_random_strings(b: &mut Bencher) {
-    let mut strings: Vec<_> = (0..INTEGERS).map(|i| i.to_string()).collect();
+    let mut strings: Vec<_> = (0..INTEGERS as u64).map(|i| (i * i).to_string()).collect();
     weak_rng().shuffle(&mut strings);
     b.iter(|| {
         let map = new_map!(&str);
@@ -79,6 +79,84 @@ fn insert_random_strings(b: &mut Bencher) {
         map
     });
     b.bytes = INTEGERS as u64;
+}
+
+#[bench]
+#[inline(never)]
+fn insert_sequential_integers_std(b: &mut Bencher) {
+    b.iter(|| {
+        let mut map = ::std::collections::HashMap::<u32, i8>::new();
+        for i in 0..INTEGERS {
+            map.insert(i, 0);
+        }
+        map
+    });
+    b.bytes = INTEGERS as u64;
+}
+
+#[bench]
+#[inline(never)]
+fn insert_random_integers_std(b: &mut Bencher) {
+    let mut integers: Vec<_> = (0..INTEGERS).collect();
+    weak_rng().shuffle(&mut integers);
+    b.iter(|| {
+        let mut map = ::std::collections::HashMap::<u32, i8>::new();
+        for &i in integers.iter() {
+            map.insert(i, 0);
+        }
+        map
+    });
+    b.bytes = INTEGERS as u64;
+}
+
+#[bench]
+#[inline(never)]
+fn insert_sequential_strings_std(b: &mut Bencher) {
+    let strings: Vec<_> = (0..INTEGERS as u64).map(|i| (i * i).to_string()).collect();
+    b.iter(|| {
+        let mut map = ::std::collections::HashMap::<String, i8>::new();
+        for i in strings.iter() {
+            map.insert(i.clone(), 0);
+        }
+        map
+    });
+    b.bytes = INTEGERS as u64;
+}
+
+#[bench]
+#[inline(never)]
+fn insert_random_strings_std(b: &mut Bencher) {
+    let mut strings: Vec<_> = (0..INTEGERS as u64).map(|i| (i * i).to_string()).collect();
+    weak_rng().shuffle(&mut strings);
+    b.iter(|| {
+        let mut map = ::std::collections::HashMap::<String, i8>::new();
+        for i in strings.iter() {
+            map.insert(i.clone(), 0);
+        }
+        map
+    });
+    b.bytes = INTEGERS as u64;
+}
+
+#[ignore]
+#[bench]
+#[inline(never)]
+fn random_integer_lookup_50_large(b: &mut Bencher) {
+    let map = new_map!(u64);
+    let len = 1000_000;
+    for i in 0..len {
+        map.insert(i, 0);
+    }
+    let mut nums: Vec<_> = (0..2 * len).collect();
+    XorShiftRng::new_unseeded().shuffle(&mut nums);
+    b.iter(|| {
+        for _ in 0..1 {
+            for i in nums.iter() {
+                test::black_box(map.find(i));
+            }
+        }
+    });
+    b.bytes = nums.len() as u64;
 }
 
 // TODO Replace these with a macro when #12249 is solved
@@ -134,28 +212,24 @@ fn random_integer_lookup(hit_rate: f64, b: &mut Bencher) {
     b.bytes = n as u64 as u64;
 }
 
-#[ignore]
 #[bench]
 #[inline(never)]
 fn random_integer_lookup_100_std(b: &mut Bencher) {
     random_integer_lookup_std(100.0, b);
 }
 
-#[ignore]
 #[bench]
 #[inline(never)]
 fn random_integer_lookup_95_std(b: &mut Bencher) {
     random_integer_lookup_std(95.0, b);
 }
 
-#[ignore]
 #[bench]
 #[inline(never)]
 fn random_integer_lookup_50_std(b: &mut Bencher) {
     random_integer_lookup_std(50.0, b);
 }
 
-#[ignore]
 #[bench]
 #[inline(never)]
 fn random_integer_lookup_5_std(b: &mut Bencher) {
