@@ -1,5 +1,5 @@
 use std::hash::{Hasher, Hash};
-use std::collections::hash_state::HashState;
+use std::hash::BuildHasher;
 use std::collections::hash_map::RandomState;
 use spin::{RwLock, RwLockReadGuard};
 use std::default::Default;
@@ -19,20 +19,21 @@ use table::*;
 // Therefore each table can be resized independently.
 
 /// A concurrent hashmap using sharding and reader-writer locking.
-pub struct ConcHashMap<K, V, S=RandomState> where K: Send + Sync, V: Send + Sync {
+pub struct ConcHashMap<K, V, H=RandomState> where K: Send + Sync, V: Send + Sync {
     tables: Vec<RwLock<Table<K, V>>>,
-    hash_state: S,
+    hasher_factory: H,
     table_shift: u64,
     table_mask: u64,
 }
 
-impl <K, V, S> ConcHashMap<K, V, S> where K: Hash + Eq + Send + Sync, V: Send + Sync, S: HashState {
+impl <K, V, H> ConcHashMap<K, V, H>
+        where K: Hash + Eq + Send + Sync, V: Send + Sync, H: BuildHasher {
 
     pub fn new() -> ConcHashMap<K, V> {
         Default::default()
     }
 
-    pub fn with_options(opts: Options<S>) -> ConcHashMap<K, V, S> {
+    pub fn with_options(opts: Options<H>) -> ConcHashMap<K, V, H> {
         let conc = opts.concurrency as usize;
         let partitions = conc.checked_next_power_of_two().unwrap_or((conc / 2).next_power_of_two());
         let capacity = f64_to_usize(opts.capacity as f64 / 0.92).expect("capacity overflow");
@@ -43,7 +44,7 @@ impl <K, V, S> ConcHashMap<K, V, S> where K: Hash + Eq + Send + Sync, V: Send + 
         }
         ConcHashMap {
             tables: tables,
-            hash_state: opts.hash_state,
+            hasher_factory: opts.hasher_factory,
             table_shift: if partitions == 1 { 0 } else { 64 - partitions.trailing_zeros() as u64 },
             table_mask: partitions as u64 - 1
         }
@@ -90,18 +91,18 @@ impl <K, V, S> ConcHashMap<K, V, S> where K: Hash + Eq + Send + Sync, V: Send + 
 
     fn hash<Q: ?Sized>(&self, key: &Q) -> u64
             where K: Borrow<Q> + Hash + Eq + Send + Sync, Q: Hash + Eq + Sync {
-        let mut hasher = self.hash_state.hasher();
+        let mut hasher = self.hasher_factory.build_hasher();
         key.hash(&mut hasher);
         hasher.finish()
     }
 }
 
-impl <K, V, S> Clone for ConcHashMap<K, V, S>
-        where K: Hash + Eq + Send + Sync + Clone, V: Send + Sync + Clone, S: HashState + Clone {
-    fn clone(&self) -> ConcHashMap<K, V, S> {
-        let clone = ConcHashMap::<K, V, S>::with_options(Options {
+impl <K, V, H> Clone for ConcHashMap<K, V, H>
+        where K: Hash + Eq + Send + Sync + Clone, V: Send + Sync + Clone, H: BuildHasher + Clone {
+    fn clone(&self) -> ConcHashMap<K, V, H> {
+        let clone = ConcHashMap::<K, V, H>::with_options(Options {
             capacity: 16,  // TODO
-            hash_state: self.hash_state.clone(),
+            hasher_factory: self.hasher_factory.clone(),
             concurrency: min(u16::MAX as usize, self.tables.len()) as u16
         });
         for (k, v) in self.iter() {
@@ -111,11 +112,11 @@ impl <K, V, S> Clone for ConcHashMap<K, V, S>
     }
 }
 
-impl <K, V, S> FromIterator<(K, V)> for ConcHashMap<K, V, S>
-        where K: Eq + Hash + Send + Sync, V: Send + Sync, S: HashState + Default {
+impl <K, V, H> FromIterator<(K, V)> for ConcHashMap<K, V, H>
+        where K: Eq + Hash + Send + Sync, V: Send + Sync, H: BuildHasher + Default {
     fn from_iter<T>(iterator: T) -> Self where T: IntoIterator<Item=(K, V)> {
         let iterator = iterator.into_iter();
-        let mut options: Options<S> = Default::default();
+        let mut options: Options<H> = Default::default();
         if let (_, Some(bound)) = iterator.size_hint() {
             options.capacity = bound;
         }
@@ -127,8 +128,8 @@ impl <K, V, S> FromIterator<(K, V)> for ConcHashMap<K, V, S>
     }
 }
 
-impl <K, V, S> ConcHashMap<K, V, S> where K: Send + Sync, V: Send + Sync {
-    pub fn iter<'a>(&'a self) -> Entries<'a, K, V, S> {
+impl <K, V, H> ConcHashMap<K, V, H> where K: Send + Sync, V: Send + Sync {
+    pub fn iter<'a>(&'a self) -> Entries<'a, K, V, H> {
        Entries {
            map: self,
            table: self.tables[0].read(),
@@ -144,21 +145,21 @@ impl <K, V, S> ConcHashMap<K, V, S> where K: Send + Sync, V: Send + Sync {
     }
 }
 
-impl <K, V, S> Default for ConcHashMap<K, V, S>
-        where K: Hash + Eq + Send + Sync, V: Send + Sync, S: HashState + Default {
-    fn default() -> ConcHashMap<K, V, S> {
+impl <K, V, H> Default for ConcHashMap<K, V, H>
+        where K: Hash + Eq + Send + Sync, V: Send + Sync, H: BuildHasher + Default {
+    fn default() -> ConcHashMap<K, V, H> {
         ConcHashMap::with_options(Default::default())
     }
 }
 
-pub struct Entries<'a, K, V, S> where K: 'a + Send + Sync, V: 'a + Send + Sync, S: 'a {
-    map: &'a ConcHashMap<K, V, S>,
+pub struct Entries<'a, K, V, H> where K: 'a + Send + Sync, V: 'a + Send + Sync, H: 'a {
+    map: &'a ConcHashMap<K, V, H>,
     table: RwLockReadGuard<'a, Table<K, V>>,
     table_idx: usize,
     bucket: usize,
 }
 
-impl <'a, K, V, S> Entries<'a, K, V, S> where K: Send + Sync, V: Send + Sync  {
+impl <'a, K, V, H> Entries<'a, K, V, H> where K: Send + Sync, V: Send + Sync  {
     fn next_table(&mut self) {
         self.table_idx += 1;
         self.table = self.map.tables[self.table_idx].read();
@@ -166,7 +167,7 @@ impl <'a, K, V, S> Entries<'a, K, V, S> where K: Send + Sync, V: Send + Sync  {
     }
 }
 
-impl <'a, K, V, S> Iterator for Entries<'a, K, V, S> where K: Send + Sync, V: Send + Sync {
+impl <'a, K, V, H> Iterator for Entries<'a, K, V, H> where K: Send + Sync, V: Send + Sync {
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<(&'a K, &'a V)> {
@@ -191,17 +192,17 @@ impl <'a, K, V, S> Iterator for Entries<'a, K, V, S> where K: Send + Sync, V: Se
     }
 }
 
-pub struct Options<S> {
+pub struct Options<H> {
     pub capacity: usize,
-    pub hash_state: S,
+    pub hasher_factory: H,
     pub concurrency: u16,
 }
 
-impl <S> Default for Options<S> where S: HashState+Default {
-    fn default() -> Options<S> {
+impl <H> Default for Options<H> where H: BuildHasher+Default {
+    fn default() -> Options<H> {
         Options {
             capacity: 0,
-            hash_state: Default::default(),
+            hasher_factory: Default::default(),
             concurrency: 16
         }
     }
@@ -226,8 +227,7 @@ fn f64_to_usize(f: f64) -> Option<usize> {
 #[cfg(test)]
 mod test {
     use std::hash::Hash;
-    use std::collections::hash_state::{HashState, DefaultState};
-    use std::hash::Hasher;
+    use std::hash::{BuildHasher, Hasher, BuildHasherDefault};
     use std::default::Default;
     use std::fmt::Debug;
     use super::*;
@@ -296,7 +296,7 @@ mod test {
 
     #[test]
     fn insert_lots() {
-        let map: ConcHashMap<i32, i32, DefaultState<OneAtATimeHasher>> = Default::default();
+        let map: ConcHashMap<i32, i32, BuildHasherDefault<OneAtATimeHasher>> = Default::default();
         for i in 0..1000 {
             if i % 2 == 0 {
                 map.insert(i, i * 2);
@@ -313,7 +313,7 @@ mod test {
 
     #[test]
     fn insert_bad_hash_lots() {
-        let map: ConcHashMap<i32, i32, DefaultState<BadHasher>> = Default::default();
+        let map: ConcHashMap<i32, i32, BuildHasherDefault<BadHasher>> = Default::default();
         for i in 0..100 {
             if i % 2 == 0 {
                 map.insert(i, i * 2);
@@ -428,8 +428,8 @@ mod test {
         }
     }
 
-    fn find_assert<K, V, S> (map: &ConcHashMap<K, V, S>, key: &K,  expected_val: &V)
-            where K: Eq + Hash + Debug + Send + Sync, V: Eq + Debug + Send + Sync, S: HashState {
+    fn find_assert<K, V, H> (map: &ConcHashMap<K, V, H>, key: &K,  expected_val: &V)
+            where K: Eq + Hash + Debug + Send + Sync, V: Eq + Debug + Send + Sync, H: BuildHasher {
         match map.find(key) {
             None    => panic!("missing key {:?} should map to {:?}", key, expected_val),
             Some(v) => assert_eq!(*v.get(), *expected_val)

@@ -1,5 +1,4 @@
 #![feature(alloc)]
-#![feature(hashmap_hasher)]
 #![feature(heap_api)]
 #![feature(oom)]
 
