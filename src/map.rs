@@ -242,6 +242,8 @@ mod test {
     use std::hash::{BuildHasher, Hasher, BuildHasherDefault};
     use std::default::Default;
     use std::fmt::Debug;
+    use std::thread;
+    use std::sync::Arc;
     use super::*;
 
     struct BadHasher;
@@ -437,6 +439,46 @@ mod test {
         let map: ConcHashMap<u32, u32> = vec.iter().map(|x| *x).collect();
         for &(k, v) in vec.iter() {
             find_assert(&map, &k, &v);
+        }
+    }
+
+    #[test]
+    fn mut_modify() {
+        let map: ConcHashMap<u32, u32> = Default::default();
+        map.insert(1, 0);
+        let mut e = map.find_mut(&1).unwrap().get();
+        *e += 1;
+        assert_eq!(&1, map.find(&1).unwrap().get());
+    }
+
+    #[test]
+    fn conc_mut_modify() {
+        let mmap: Arc<ConcHashMap<u32, u32>> = Arc::new(Default::default());
+        let map = mmap.clone();
+        let range = 10000;
+        for i in 0..range {
+            map.insert(i, i*i);
+        }
+
+        let tl_map = mmap.clone();
+        let reader = thread::spawn(move || {
+            for i in 0..range {
+                tl_map.find(&i).unwrap().get();
+            }
+        });
+
+        let tl_map = mmap.clone();
+        let writer = thread::spawn(move || {
+            for i in 0..range {
+                let mut e = tl_map.find_mut(&i).unwrap().get();
+                *e += 1;
+            }
+        });
+
+        reader.join().unwrap();
+        writer.join().unwrap();
+        for i in 0..range {
+            assert_eq!(map.find(&i).unwrap().get(), &(i*i+1));
         }
     }
 
