@@ -63,6 +63,18 @@ impl <K, V, H> ConcHashMap<K, V, H>
     }
 
     #[inline(never)]
+    pub fn find_mut<'a, Q: ?Sized>(&'a self, key: &Q) -> Option<MutAccessor<'a, K, V>>
+            where K: Borrow<Q> + Hash + Eq + Send + Sync, Q: Hash + Eq + Sync {
+        let hash = self.hash(key);
+        let table_idx = self.table_for(hash);
+        let table = self.tables[table_idx].write();
+        match table.lookup(hash, |k| k.borrow() == key) {
+            Some(idx) => Some(MutAccessor::new(table, idx)),
+            None      => None
+        }
+    }
+
+    #[inline(never)]
     pub fn insert(&self, key: K, value: V) -> Option<V> {
         let hash = self.hash(&key);
         let table_idx = self.table_for(hash);

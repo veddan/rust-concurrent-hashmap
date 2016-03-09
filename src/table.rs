@@ -1,5 +1,5 @@
 use std::hash::{Hash};
-use spin::{RwLockReadGuard};
+use spin::{RwLockReadGuard, RwLockWriteGuard};
 use std::ptr;
 use std::mem;
 use std::cmp::{max};
@@ -75,6 +75,11 @@ pub struct Accessor<'a, K: 'a, V: 'a> {
     idx: usize
 }
 
+pub struct MutAccessor<'a, K: 'a, V: 'a> {
+    table: RwLockWriteGuard<'a, Table<K, V>>,
+    idx: usize
+}
+
 impl <'a, K, V> Accessor<'a, K, V> {
     pub fn new(table: RwLockReadGuard<'a, Table<K, V>>, idx: usize) -> Accessor<'a, K, V> {
         Accessor {
@@ -87,6 +92,22 @@ impl <'a, K, V> Accessor<'a, K, V> {
         debug_assert!(self.table.is_present(self.idx));
         unsafe {
             &*self.table.values.offset(self.idx as isize)
+        }
+    }
+}
+
+impl <'a, K, V> MutAccessor<'a, K, V> {
+    pub fn new(table: RwLockWriteGuard<'a, Table<K, V>>, idx: usize) -> MutAccessor<'a, K, V> {
+        MutAccessor {
+            table: table,
+            idx: idx
+        }
+    }
+
+    pub fn get(&mut self) -> &'a mut V {
+        debug_assert!(self.table.is_present(self.idx));
+        unsafe {
+            &mut *self.table.values.offset(self.idx as isize)
         }
     }
 }
