@@ -1,5 +1,7 @@
 # rust-concurrent-hashmap
 
+[![Crates.io](https://img.shields.io/crates/v/concurrent-hashmap.svg)](https://crates.io/crates/concurrent-hashmap)
+
 [Documentation](https://veddan.github.io/rustdoc/concurrent-hashmap/concurrent_hashmap/index.html)
 
 This is a Rust implementing a concurrent hashmap.
