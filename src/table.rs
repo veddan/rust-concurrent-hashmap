@@ -1,5 +1,5 @@
 use std::hash::{Hash};
-use spin::{RwLockReadGuard, RwLockWriteGuard};
+use spin::{MutexGuard};
 use std::ptr;
 use std::mem;
 use std::cmp::{max};
@@ -74,7 +74,7 @@ pub struct Table<K, V> {
 ///
 /// Note that this acts as a lock guard to a part of the map.
 pub struct Accessor<'a, K: 'a, V: 'a> {
-    table: RwLockReadGuard<'a, Table<K, V>>,
+    table: MutexGuard<'a, Table<K, V>>,
     idx: usize
 }
 
@@ -82,12 +82,12 @@ pub struct Accessor<'a, K: 'a, V: 'a> {
 ///
 /// Note that this acts as a lock guard to a part of the map.
 pub struct MutAccessor<'a, K: 'a, V: 'a> {
-    table: RwLockWriteGuard<'a, Table<K, V>>,
+    table: MutexGuard<'a, Table<K, V>>,
     idx: usize
 }
 
 impl <'a, K, V> Accessor<'a, K, V> {
-    pub fn new(table: RwLockReadGuard<'a, Table<K, V>>, idx: usize) -> Accessor<'a, K, V> {
+    pub fn new(table: MutexGuard<'a, Table<K, V>>, idx: usize) -> Accessor<'a, K, V> {
         Accessor {
             table: table,
             idx: idx
@@ -103,7 +103,7 @@ impl <'a, K, V> Accessor<'a, K, V> {
 }
 
 impl <'a, K, V> MutAccessor<'a, K, V> {
-    pub fn new(table: RwLockWriteGuard<'a, Table<K, V>>, idx: usize) -> MutAccessor<'a, K, V> {
+    pub fn new(table: MutexGuard<'a, Table<K, V>>, idx: usize) -> MutAccessor<'a, K, V> {
         MutAccessor {
             table: table,
             idx: idx
