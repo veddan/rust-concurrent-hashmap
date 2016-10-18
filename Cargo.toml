@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Viktor Dahl <pazaconyoman@gmail.com>"]
 
 [dependencies]
-spin = '0.3.5'
+spin = '0.4.4'
 
 [dev-dependencies]
 rand = '0.3.11'
