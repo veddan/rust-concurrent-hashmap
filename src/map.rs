@@ -29,10 +29,12 @@ pub struct ConcHashMap<K, V, H=RandomState> where K: Send + Sync, V: Send + Sync
 impl <K, V, H> ConcHashMap<K, V, H>
         where K: Hash + Eq + Send + Sync, V: Send + Sync, H: BuildHasher {
 
+    /// Creates a new hashmap using default options.
     pub fn new() -> ConcHashMap<K, V> {
         Default::default()
     }
 
+    /// Creates a new hashmap with custom options.
     pub fn with_options(opts: Options<H>) -> ConcHashMap<K, V, H> {
         let conc = opts.concurrency as usize;
         let partitions = conc.checked_next_power_of_two().unwrap_or((conc / 2).next_power_of_two());
@@ -50,6 +52,24 @@ impl <K, V, H> ConcHashMap<K, V, H>
         }
     }
 
+    /// Searches for a key, returning an accessor to the mapped values (or `None` if no mapping
+    /// exists).
+    ///
+    /// Note that as long as the `Accessor` lives, a lock is held.
+    ///
+    /// # Examples
+    ///
+    /// Printing a value if it exists:
+    ///
+    /// ```
+    /// # use concurrent_hashmap::*;
+    /// # let map = ConcHashMap::<u32, u32>::new();
+    /// map.insert(100, 1);
+    /// if let Some(val) = map.find(&100) {
+    ///     println!("100 => {}", val.get());
+    /// }
+    /// # println!("workaround");
+    /// ```
     #[inline(never)]
     pub fn find<'a, Q: ?Sized>(&'a self, key: &Q) -> Option<Accessor<'a, K, V>>
             where K: Borrow<Q> + Hash + Eq + Send + Sync, Q: Hash + Eq + Sync {
@@ -62,6 +82,24 @@ impl <K, V, H> ConcHashMap<K, V, H>
         }
     }
 
+    /// Searches for a key, returning a mutable accessor to the mapped value
+    /// (or `None` if no mapping exists).
+    ///
+    /// Note that as long as the `MutAccessor` lives, a lock is held.
+    ///
+    /// # Examples
+    ///
+    /// Adding 2 to a value if it exists:
+    ///
+    /// ```
+    /// # use concurrent_hashmap::*;
+    /// # let map = ConcHashMap::<u32, u32>::new();
+    /// map.insert(100, 1);
+    /// if let Some(mut val) = map.find_mut(&100) {
+    ///     *val.get() += 2;
+    /// }
+    /// # println!("workaround");
+    /// ```
     #[inline(never)]
     pub fn find_mut<'a, Q: ?Sized>(&'a self, key: &Q) -> Option<MutAccessor<'a, K, V>>
             where K: Borrow<Q> + Hash + Eq + Send + Sync, Q: Hash + Eq + Sync {
@@ -74,6 +112,8 @@ impl <K, V, H> ConcHashMap<K, V, H>
         }
     }
 
+    /// Inserts a new mapping from `key` to `value`.
+    /// If a previous mapping existed for `key`, it is returned.
     #[inline(never)]
     pub fn insert(&self, key: K, value: V) -> Option<V> {
         let hash = self.hash(&key);
@@ -82,6 +122,21 @@ impl <K, V, H> ConcHashMap<K, V, H>
         table.put(key, value, hash, |old, mut new| { swap(old, &mut new); new })
     }
 
+    /// Performs on "upsert" operation:
+    /// Updates the value currently mapped to `key` using `updater`,
+    /// or maps `key` to `value` if no previous mapping existed.
+    ///
+    /// # Examples
+    /// ```
+    /// # use concurrent_hashmap::*;
+    /// # use std::string::String;
+    /// let word_counts = ConcHashMap::<String, u32>::new();
+    /// let words = ["a", "car", "is", "a", "thing"];
+    /// for word in words.iter().map(|s| s.to_string()) {
+    ///     word_counts.upsert(word, 1, &|count| *count += 1);
+    /// }
+    /// // Map is now "a"=>2, "car"=>1, "thing"=>1
+    /// ```
     pub fn upsert<U: Fn(&mut V)>(&self, key: K, value: V, updater: &U) {
         let hash = self.hash(&key);
         let table_idx = self.table_for(hash);
@@ -89,6 +144,9 @@ impl <K, V, H> ConcHashMap<K, V, H>
         table.put(key, value, hash, |old, _| { updater(old); });
     }
 
+    /// Removes any mapping associated with `key`.
+    ///
+    /// If a mapping was removed, the mapped values is returned.
     pub fn remove<'a, Q: ?Sized>(&'a self, key: &Q) -> Option<V>
             where K: Borrow<Q> + Hash + Eq + Send + Sync, Q: Hash + Eq + Sync {
         let hash = self.hash(key);
@@ -111,6 +169,11 @@ impl <K, V, H> ConcHashMap<K, V, H>
 
 impl <K, V, H> Clone for ConcHashMap<K, V, H>
         where K: Hash + Eq + Send + Sync + Clone, V: Send + Sync + Clone, H: BuildHasher + Clone {
+    /// Clones the hashmap, returning a new map with the same mappings and hasher.
+    ///
+    /// If a consistent snapshot is desired, external synchronization is required.
+    /// In the absence of external synchronization, this method has the same consistency guarantees
+    /// as .iter().
     fn clone(&self) -> ConcHashMap<K, V, H> {
         let clone = ConcHashMap::<K, V, H>::with_options(Options {
             capacity: 16,  // TODO
@@ -141,6 +204,13 @@ impl <K, V, H> FromIterator<(K, V)> for ConcHashMap<K, V, H>
 }
 
 impl <K, V, H> ConcHashMap<K, V, H> where K: Send + Sync, V: Send + Sync {
+    /// Iterates over all mappings.
+    ///
+    /// This method does not provide a consistent snapshot of the map.
+    /// All mappings returned must have been in the map at some point, but updates performed during
+    /// the iteration may or may not be reflected.
+    ///
+    /// Iterating may block writers.
     pub fn iter<'a>(&'a self) -> Entries<'a, K, V, H> {
        Entries {
            map: self,
@@ -150,6 +220,10 @@ impl <K, V, H> ConcHashMap<K, V, H> where K: Send + Sync, V: Send + Sync {
        }
     }
 
+    /// Removes all mappings.
+    ///
+    /// In the absence of external synchronization, the map can not be guaranteed to have been empty
+    /// at any point during or after the `.clear()` call.
     pub fn clear(&self) {
         for table in self.tables.iter() {
             table.write().clear();
@@ -159,11 +233,13 @@ impl <K, V, H> ConcHashMap<K, V, H> where K: Send + Sync, V: Send + Sync {
 
 impl <K, V, H> Default for ConcHashMap<K, V, H>
         where K: Hash + Eq + Send + Sync, V: Send + Sync, H: BuildHasher + Default {
+    /// Equivalent to `ConcHashMap::new()`.
     fn default() -> ConcHashMap<K, V, H> {
         ConcHashMap::with_options(Default::default())
     }
 }
 
+/// Iterator over the hashmap's mappings.
 pub struct Entries<'a, K, V, H> where K: 'a + Send + Sync, V: 'a + Send + Sync, H: 'a {
     map: &'a ConcHashMap<K, V, H>,
     table: RwLockReadGuard<'a, Table<K, V>>,
@@ -204,9 +280,21 @@ impl <'a, K, V, H> Iterator for Entries<'a, K, V, H> where K: Send + Sync, V: Se
     }
 }
 
+/// Options used when creating a hashmap.
 pub struct Options<H> {
+    /// Number of mappings to preallocate space for.
+    ///
+    /// The map will always grow as needed, but preallocating space can improve performance.
+    /// This value applies to the entire map.
+    /// By default, no space is preallocated.
     pub capacity: usize,
+    /// Factory for the hasher used for hashing keys.
     pub hasher_factory: H,
+    /// Expected level of concurrency.
+    ///
+    /// This value controls the number of partitions used internally in the map.
+    /// A higher value leads to less contention, but also greater memory overhead.
+    /// The default value is 16.
     pub concurrency: u16,
 }
 

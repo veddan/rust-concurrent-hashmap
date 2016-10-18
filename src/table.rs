@@ -70,11 +70,17 @@ pub struct Table<K, V> {
     len: usize,
 }
 
+/// A handle to a particular mapping.
+///
+/// Note that this acts as a lock guard to a part of the map.
 pub struct Accessor<'a, K: 'a, V: 'a> {
     table: RwLockReadGuard<'a, Table<K, V>>,
     idx: usize
 }
 
+/// A mutable handle to a particular mapping.
+///
+/// Note that this acts as a lock guard to a part of the map.
 pub struct MutAccessor<'a, K: 'a, V: 'a> {
     table: RwLockWriteGuard<'a, Table<K, V>>,
     idx: usize
