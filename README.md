@@ -49,7 +49,8 @@ A key will never move between partitions, so they can be resized independently a
 Each partition is an open-addressed hashtable, using quadratic probing.
 Deletion is handled by tombstones and bucket occupancy is tracked by a bitmap.
 
-Single-threaded insertion performance is similar to or better than `std::collections::HashMap`.
+Single-threaded insertion performance is similar to or better than `std::collections::HashMap`,
+ while read performance is worse.
 
 ## Concurrency notes
 This is not a lock-free hashtable.
