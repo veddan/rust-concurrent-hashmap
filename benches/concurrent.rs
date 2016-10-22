@@ -4,9 +4,9 @@ extern crate test;
 extern crate rand;
 extern crate concurrent_hashmap;
 use std::thread;
-use std::sync::Arc;
+use std::sync::{Barrier, Arc};
 use test::Bencher;
-use rand::{Rng, weak_rng};
+use rand::{Rng, SeedableRng, XorShiftRng};
 use concurrent_hashmap::*;
 
 const OPS: u32 = 10000;
@@ -114,11 +114,14 @@ fn do_bench(reads: f64, nthreads: u32) {
     let nthreads = nthreads as usize;
     {
         let mut threads = Vec::new();
+        let start_barrier = Arc::new(Barrier::new(nthreads));
         for _ in 0..nthreads {
             let map = map.clone();
+            let start_barrier = start_barrier.clone();
             threads.push(thread::spawn(move || {
-                let mut rng = weak_rng();
+                let mut rng: XorShiftRng = SeedableRng::from_seed([1, 2, 3, 4]);
                 let mut read = 0;
+                start_barrier.wait();
                 for i in 0..OPS {
                     if rng.gen::<f64>() < reads {
                         map.find(&i).map(|x| read += *x.get());
