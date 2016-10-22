@@ -5,7 +5,14 @@
 [Documentation](https://veddan.github.io/rustdoc/concurrent-hashmap/concurrent_hashmap/index.html)
 
 This is a Rust implementing a concurrent hashmap.
-It curently requires the nightly build of Rust compiler.
+
+The crate works on stable Rust if default features are disabled:
+```toml
+[depdencies.concurrent-hashmap]
+version = "0.1.0"
+default-features = false
+```
+However, performance is better with nightly rustc due to use of unstable `#![feature]`s.
 
 ## Usage
 ```rust

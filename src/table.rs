@@ -3,9 +3,8 @@ use spin::{MutexGuard};
 use std::ptr;
 use std::mem;
 use std::cmp::{max};
-use std::mem::{align_of, size_of, drop};
+use std::mem::{size_of, drop};
 use std::marker::{Send, Sync};
-use alloc::heap::{allocate, deallocate, EMPTY};
 
 // This is the actual hash table implementation.
 // The Table struct does not have any synchronization; that is handled by the ConHashMap wrapper.
@@ -32,34 +31,20 @@ const TOMBSTONE: u64 = 0x0001000000000000;
 // If this bit is in a stored hash, the entry entry is present.
 const PRESENT: u64 = 0x1000000000000000;
 
+// The proper heap API is only available in nightlies
 unsafe fn alloc<T>(count: usize, zero: bool) -> *mut T {
-    if count == 0 {
-        return ptr::null_mut();
-    }
-    if size_of::<T>() == 0 {
-        return EMPTY as *mut T;
-    }
-    let alloc_size = match count.checked_mul(size_of::<T>()) {
-        None    => panic!("allocation size overflow"),
-        Some(s) => s
-    };
-    let p = allocate(alloc_size, align_of::<T>());
-    if p.is_null() {
-        ::alloc::oom()
-    }
-    let ret = p as *mut T;
+    let mut dummy: Vec<T> = Vec::with_capacity(count);
+    let ptr = dummy.as_mut_ptr();
     if zero {
-        ptr::write_bytes(ret, 0, count);
+        ptr::write_bytes(ptr, 0, count);
     }
-    return ret;
+    mem::forget(dummy);
+    return ptr;
 }
 
 unsafe fn dealloc<T>(p: *mut T, count: usize) {
-    if p.is_null() || count == 0 || p as *mut () == EMPTY {
-        return;
-    }
-    let size = count * size_of::<T>();
-    deallocate(p as *mut u8, size, align_of::<T>());
+    let _dummy: Vec<T> = Vec::from_raw_parts(p, 0, count);
+    // Dummy is dropped and the memory is freed
 }
 
 pub struct Table<K, V> {

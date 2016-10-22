@@ -7,8 +7,13 @@ repository = "https://github.com/veddan/rust-concurrent-hashmap.git"
 documentation = "https://veddan.github.io/rustdoc/concurrent-hashmap/concurrent_hashmap/index.html"
 description = "A concurrent hashmap library."
 
-[dependencies]
-spin = '0.4.4'
+[dependencies.spin]
+version = '0.4.4'
+default-features = false
+
+[features]
+unstable = ["spin/asm"]
+default = ["unstable"]
 
 [dev-dependencies]
 rand = '0.3.11'
@@ -18,3 +23,6 @@ opt-level = 1
 
 [profile.bench]
 debug = true
+
+[replace]
+"spin-rs:0.4.4" =  { path = "/home/viktor/Documents/rust/spin-rs/" }
