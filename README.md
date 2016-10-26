@@ -9,7 +9,7 @@ This is a Rust implementing a concurrent hashmap.
 The crate works on stable Rust if default features are disabled:
 ```toml
 [depdencies.concurrent-hashmap]
-version = "0.2.0"
+version = "0.2.1"
 default-features = false
 ```
 However, performance is better with nightly rustc due to use of unstable `#![feature]`s.
