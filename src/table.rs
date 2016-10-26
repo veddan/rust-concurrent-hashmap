@@ -1,9 +1,9 @@
-use std::hash::{Hash};
-use spin::{MutexGuard};
-use std::ptr;
+use std::hash::Hash;
+use spin::MutexGuard;
+use std::ptr::{self, drop_in_place};
 use std::mem;
-use std::cmp::{max};
-use std::mem::{size_of, drop};
+use std::cmp::max;
+use std::mem::size_of;
 use std::marker::{Send, Sync};
 
 // This is the actual hash table implementation.
@@ -172,7 +172,7 @@ impl <K, V> Table<K, V> where K: Hash + Eq {
             None    => return None
         };
         unsafe {
-            drop::<K>(ptr::read(self.keys.offset(i as isize)));
+            drop_in_place::<K>(self.keys.offset(i as isize));
             *self.hashes.offset(i as isize) = TOMBSTONE;
             self.len -= 1;
             let value = ptr::read(self.values.offset(i as isize));
@@ -209,6 +209,7 @@ impl <K, V> Table<K, V> where K: Hash + Eq {
             dealloc(self.hashes, self.capacity);
             dealloc(self.keys, self.capacity);
             dealloc(self.values, self.capacity);
+            // This is checked in drop() to see that this instance is already "dropped"
             self.hashes = ptr::null_mut();
         }
         mem::swap(self, &mut new_table);
@@ -259,8 +260,8 @@ impl <K, V> Table<K, V> {
     pub fn clear(&mut self) {
         self.foreach_present_idx(|i| {
             unsafe {
-                drop::<K>(ptr::read(self.keys.offset(i as isize)));
-                drop::<V>(ptr::read(self.values.offset(i as isize)));
+                drop_in_place::<K>(self.keys.offset(i as isize));
+                drop_in_place::<V>(self.values.offset(i as isize));
             }
         });
         unsafe {
@@ -306,8 +307,8 @@ impl <K, V> Drop for Table<K, V> {
         }
         self.foreach_present_idx(|i| {
             unsafe {
-                drop::<K>(ptr::read(self.keys.offset(i as isize)));
-                drop::<V>(ptr::read(self.values.offset(i as isize)));
+                drop_in_place::<K>(self.keys.offset(i as isize));
+                drop_in_place::<V>(self.values.offset(i as isize));
             }
         });
         unsafe {

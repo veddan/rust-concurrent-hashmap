@@ -159,45 +159,57 @@ fn random_integer_lookup_50_large(b: &mut Bencher) {
 #[bench]
 #[inline(never)]
 fn random_integer_lookup_100(b: &mut Bencher) {
-    random_integer_lookup(100.0, b);
+    random_integer_lookup(100.0, b, INTEGERS);
 }
 
 #[bench]
 #[inline(never)]
 fn random_integer_lookup_95(b: &mut Bencher) {
-    random_integer_lookup(95.0, b);
+    random_integer_lookup(95.0, b, INTEGERS);
 }
 
 #[bench]
 #[inline(never)]
 fn random_integer_lookup_50(b: &mut Bencher) {
-    random_integer_lookup(50.0, b);
+    random_integer_lookup(50.0, b, INTEGERS);
 }
 
 #[bench]
 #[inline(never)]
 fn random_integer_lookup_5(b: &mut Bencher) {
-    random_integer_lookup(5.0, b);
+    random_integer_lookup(5.0, b, INTEGERS);
 }
 
 #[bench]
 #[inline(never)]
 fn random_integer_lookup_0(b: &mut Bencher) {
-    random_integer_lookup(0.0, b);
+    random_integer_lookup(0.0, b, INTEGERS);
 }
 
-fn random_integer_lookup(hit_rate: f64, b: &mut Bencher) {
+#[bench]
+#[inline(never)]
+fn random_integer_lookup_95_huge(b: &mut Bencher) {
+    random_integer_lookup(95.0, b, INTEGERS * 100);
+}
+
+#[bench]
+#[inline(never)]
+fn random_string_lookup_95_huge(b: &mut Bencher) {
+    random_string_lookup(95.0, b, INTEGERS * 100);
+}
+
+fn random_integer_lookup(hit_rate: f64, b: &mut Bencher, count: u32) {
     let mut rng = weak_rng();
     let map = new_map!(u32);
-    for i in 0..INTEGERS {
+    for i in 0..count {
         map.insert(i, 0);
     }
     let base_n = 1000;
     let n = max(1, base_n - (0.99 * base_n as f64 * (1.0 - hit_rate / 100.0)) as u32);
     let (min, max) = if hit_rate > 0.0 {
-        (0, (INTEGERS as f64 / (hit_rate / 100.0)) as u32)
+        (0, (count as f64 / (hit_rate / 100.0)) as u32)
     } else {
-        (INTEGERS, 2 * INTEGERS)
+        (count, 2 * count)
     };
     let keys: Vec<_> = (0..n).map(|_| rng.gen_range(min, max)).collect();
     b.iter(||
@@ -206,6 +218,23 @@ fn random_integer_lookup(hit_rate: f64, b: &mut Bencher) {
         }
     );
     b.bytes = n as u64 as u64;
+}
+
+fn random_string_lookup(hit_rate: f64, b: &mut Bencher, count: u32) {
+    let mut rng = weak_rng();
+    let map = new_map!(String);
+    for i in 0..count {
+        map.insert(format!("____{}____", i), 0);
+    }
+    let keys: Vec<_> = map.iter()
+        .map(|(k, _)| if rng.gen::<f64>() < hit_rate { k.to_string() } else { "miss".to_string() })
+        .collect();
+    b.iter(||
+        for key in keys.iter() {
+            test::black_box(map.find(key));
+        }
+    );
+    b.bytes = count as u64 as u64;
 }
 
 #[bench]
