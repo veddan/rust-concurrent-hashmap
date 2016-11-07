@@ -18,7 +18,7 @@ use table::*;
 // That means that resizing a Table will never cause a key to cross between Tables.
 // Therefore each table can be resized independently.
 
-/// A concurrent hashmap using sharding and reader-writer locking.
+/// A concurrent hashmap using sharding
 pub struct ConcHashMap<K, V, H=RandomState> where K: Send + Sync, V: Send + Sync {
     tables: Vec<Mutex<Table<K, V>>>,
     hasher_factory: H,
