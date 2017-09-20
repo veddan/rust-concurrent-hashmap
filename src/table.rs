@@ -102,8 +102,8 @@ impl <'a, K: Hash + Eq, V> MutAccessor<'a, K, V> {
         }
     }
 
-    pub fn remove(&mut self) {
-        self.table.remove_index(self.idx);
+    pub fn remove(&mut self) -> Option<V> {
+        self.table.remove_index(self.idx)
     }
 }
 
