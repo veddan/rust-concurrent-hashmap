@@ -87,7 +87,7 @@ impl <'a, K, V> Accessor<'a, K, V> {
     }
 }
 
-impl <'a, K, V> MutAccessor<'a, K, V> {
+impl <'a, K: Hash + Eq, V> MutAccessor<'a, K, V> {
     pub fn new(table: MutexGuard<'a, Table<K, V>>, idx: usize) -> MutAccessor<'a, K, V> {
         MutAccessor {
             table: table,
@@ -100,6 +100,10 @@ impl <'a, K, V> MutAccessor<'a, K, V> {
         unsafe {
             &mut *self.table.values.offset(self.idx as isize)
         }
+    }
+
+    pub fn remove(&mut self) -> Option<V> {
+        self.table.remove_index(self.idx)
     }
 }
 
@@ -171,6 +175,10 @@ impl <K, V> Table<K, V> where K: Hash + Eq {
             Some(i) => i,
             None    => return None
         };
+        self.remove_index(i)
+    }
+
+    pub fn remove_index(&mut self, i: usize) -> Option<V> {
         unsafe {
             drop_in_place::<K>(self.keys.offset(i as isize));
             *self.hashes.offset(i as isize) = TOMBSTONE;

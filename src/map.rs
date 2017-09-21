@@ -522,6 +522,18 @@ mod test {
     }
 
     #[test]
+    fn test_remove_mut_accessor() {
+        let map: ConcHashMap<i32, String> = Default::default();
+        map.insert(1, "one".to_string());
+        map.insert(2, "two".to_string());
+        map.insert(3, "three".to_string());
+        assert_eq!(Some("two".to_string()), map.find_mut(&2).unwrap().remove());
+        assert_eq!("one", map.find(&1).unwrap().get());
+        assert!(map.find(&2).is_none());
+        assert_eq!("three", map.find(&3).unwrap().get());
+    }
+
+    #[test]
     fn test_from_iterator() {
         let vec: Vec<(u32, u32)> = (0..100).map(|i| (i, i * i)).collect();
         let map: ConcHashMap<u32, u32> = vec.iter().map(|x| *x).collect();
