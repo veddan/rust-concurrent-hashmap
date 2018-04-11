@@ -27,12 +27,14 @@ pub struct ConcHashMap<K, V, H=RandomState> where K: Send + Sync, V: Send + Sync
 }
 
 impl <K, V, H> ConcHashMap<K, V, H>
-        where K: Hash + Eq + Send + Sync, V: Send + Sync, H: BuildHasher {
-
+        where K: Hash + Eq + Send + Sync, V: Send + Sync, H: BuildHasher + Default {
     /// Creates a new hashmap using default options.
-    pub fn new() -> ConcHashMap<K, V> {
+    pub fn new() -> ConcHashMap<K, V, H> {
         Default::default()
     }
+}
+impl <K, V, H> ConcHashMap<K, V, H>
+        where K: Hash + Eq + Send + Sync, V: Send + Sync, H: BuildHasher {
 
     /// Creates a new hashmap with custom options.
     pub fn with_options(opts: Options<H>) -> ConcHashMap<K, V, H> {
