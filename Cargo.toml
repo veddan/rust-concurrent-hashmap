@@ -8,12 +8,8 @@ documentation = "https://veddan.github.io/rustdoc/concurrent-hashmap/concurrent_
 description = "A concurrent hashmap library."
 
 [dependencies.spin]
-version = '0.4.5'
+version = '0.5.2'
 default-features = false
-
-[features]
-unstable = ["spin/asm"]
-default = ["unstable"]
 
 [dev-dependencies]
 rand = '0.3.11'

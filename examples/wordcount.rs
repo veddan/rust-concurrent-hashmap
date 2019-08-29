@@ -1,4 +1,3 @@
-#![feature(step_by)]
 extern crate concurrent_hashmap;
 
 use std::io::Read;
