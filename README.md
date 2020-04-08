@@ -72,3 +72,5 @@ Iterating does not provide a consistent snapshot of the table's contents.
 Updates performed while iterating over the table may or may not be reflected in the iteration.
 Iterating works by locking a one partition at a time.
 
+## Copyright and License
+This work is copyright <insert year and copyright holder> and licensed under the MIT or Apache 2.0 license.
